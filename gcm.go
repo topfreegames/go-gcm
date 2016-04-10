@@ -354,7 +354,7 @@ func (c *xmppGcmClient) gracefulClose() {
 	case <-c.waitAllDone():
 		break
 	case <-time.After(5 * time.Second):
-		log.Error("xmpp taking a while to close, so giving up")
+		debug("xmpp taking a while to close, so giving up")
 		break
 	}
 
