@@ -9,8 +9,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/mattn/go-xmpp"
 	"github.com/pborman/uuid"
+	"github.com/rounds/go-xmpp"
 )
 
 const (
@@ -124,7 +124,7 @@ func newXmppGcmClient(senderID string, apiKey string) (*xmppGcmClient, error) {
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) ping(timeout time.Duration) error {
-	if err := c.XmppClient.PingC2S(c.XmppClient.JID(), xmppHost); err != nil {
+	if err := c.XmppClient.PingC2S("", ""); err != nil {
 		return err
 	}
 	select {
