@@ -8,6 +8,8 @@ import (
 	"io/ioutil"
 	"net/http"
 	"time"
+
+	log "github.com/Sirupsen/logrus"
 )
 
 const (
@@ -62,6 +64,7 @@ type httpGcmClient struct {
 	apiKey     string
 	HttpClient *http.Client
 	retryAfter string
+	debug      bool
 }
 
 // Interface to stub the http client in tests.
@@ -71,12 +74,13 @@ type backoffProvider interface {
 	wait()
 }
 
-func newHttpGcmClient(apiKey string) *httpGcmClient {
+func newHttpGcmClient(apiKey string, debug bool) *httpGcmClient {
 	return &httpGcmClient{
 		GcmURL:     httpAddress,
 		apiKey:     apiKey,
 		HttpClient: &http.Client{},
 		retryAfter: "0",
+		debug:      debug,
 	}
 }
 
@@ -141,7 +145,9 @@ func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling message>%v", err)
 	}
-	debug("sending", string(bs))
+	if c.debug {
+		log.WithField("http request", string(bs)).Debug("gcm http request")
+	}
 	req, err := http.NewRequest("POST", c.GcmURL, bytes.NewReader(bs))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request>%v", err)
@@ -158,7 +164,9 @@ func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
 	if err != nil {
 		return gcmResp, fmt.Errorf("error reading http response body>%v", err)
 	}
-	debug("received body", string(body))
+	if c.debug {
+		log.WithField("http reply", string(body)).Debug("gcm http reply")
+	}
 	err = json.Unmarshal(body, &gcmResp)
 	if err != nil {
 		return gcmResp, fmt.Errorf("error unmarshaling json from body: %v", err)
