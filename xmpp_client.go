@@ -127,7 +127,7 @@ func newXmppGcmClient(senderID string, apiKey string, debug bool) (*xmppGcmClien
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) ping(timeout time.Duration) error {
-	if err := c.XmppClient.PingC2S("", ""); err != nil {
+	if err := c.XmppClient.PingC2S("", xmppHost); err != nil {
 		return err
 	}
 	select {
