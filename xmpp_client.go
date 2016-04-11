@@ -9,8 +9,8 @@ import (
 	"time"
 
 	log "github.com/Sirupsen/logrus"
+	"github.com/mattn/go-xmpp"
 	"github.com/pborman/uuid"
-	"github.com/rounds/go-xmpp"
 )
 
 const (
