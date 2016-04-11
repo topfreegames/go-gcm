@@ -16,28 +16,19 @@
 package gcm
 
 import (
-	"log"
 	"time"
 
+	log "github.com/Sirupsen/logrus"
 	"github.com/jpillora/backoff"
 )
 
 var (
-	// DebugMode determines whether to have verbose logging.
-	DebugMode = false
 	// Default Min and Max delay for backoff.
 	DefaultMinBackoff   = 1 * time.Second
 	DefaultMaxBackoff   = 10 * time.Second
 	DefaultPingInterval = 10 * time.Second
 	DefaultPingTimeout  = 5 * time.Second
 )
-
-// Prints debug info if DebugMode is set.
-func debug(m string, v interface{}) {
-	if DebugMode {
-		log.Printf(m+":%+v", v)
-	}
-}
 
 // The data payload of a GCM message.
 type Data map[string]interface{}
@@ -58,17 +49,21 @@ type Notification struct {
 	TitleLocKey  string `json:"title_loc_key,omitempty"`
 }
 
+// Client is a container for http and xmpp GCM clients.
 type Client struct {
+	Debug      bool
 	senderID   string
 	apiKey     string
 	mh         MessageHandler
 	xmppClient *xmppGcmClient
 	httpClient *httpGcmClient
+	debug      bool
 }
 
-func NewClient(senderID string, apiKey string, h MessageHandler) (*Client, error) {
-	ht := newHttpGcmClient(apiKey)
-	xm, err := connectXmpp(senderID, apiKey, h)
+// NewClient creates a new GCM client for this senderID.
+func NewClient(senderID string, apiKey string, h MessageHandler, debug bool) (*Client, error) {
+	ht := newHttpGcmClient(apiKey, debug)
+	xm, err := connectXmpp(senderID, apiKey, h, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -79,22 +74,11 @@ func NewClient(senderID string, apiKey string, h MessageHandler) (*Client, error
 		mh:         h,
 		xmppClient: xm,
 		httpClient: ht,
+		debug:      debug,
 	}
 
 	// Ping periodically and indentify xmpp disconnect.
-	go func() {
-		for {
-			if err := c.xmppClient.pingPeriodically(DefaultPingTimeout, DefaultPingInterval); err != nil {
-				newc, err := connectXmpp(senderID, apiKey, h)
-				if err != nil {
-					debug("error creating xmpp client> %s", err)
-					time.Sleep(DefaultPingInterval)
-					continue
-				}
-				c.xmppClient = newc
-			}
-		}
-	}()
+	go c.monitorConnection()
 
 	return c, nil
 }
@@ -116,8 +100,27 @@ func (c *Client) Close() error {
 	return nil
 }
 
-func connectXmpp(senderID string, apiKey string, h MessageHandler) (*xmppGcmClient, error) {
-	x, err := newXmppGcmClient(senderID, apiKey)
+func (c *Client) monitorConnection() {
+	for {
+		if err := c.xmppClient.pingPeriodically(DefaultPingTimeout, DefaultPingInterval); err == nil {
+			// Closed.
+			break
+		}
+		log.Debug("gcm xmpp ping timed out, creating new xmpp client")
+		newc, err := connectXmpp(c.senderID, c.apiKey, c.mh, c.debug)
+		if err != nil {
+			log.WithField("error", err).Error("error creating xmpp client")
+			time.Sleep(DefaultPingInterval)
+			continue
+		}
+		oldc := c.xmppClient
+		c.xmppClient = newc
+		oldc.gracefulClose()
+	}
+}
+
+func connectXmpp(senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
+	x, err := newXmppGcmClient(senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -127,9 +130,9 @@ func connectXmpp(senderID string, apiKey string, h MessageHandler) (*xmppGcmClie
 		if err := x.listen(h); err != nil {
 			// Pass the error upstream.
 			//c.cerr <- err
-			debug("gcm listen error %v", err)
+			log.WithField("error", err).Error("gcm listen")
 		}
-		debug("gcm listen finished", "")
+		log.Debug("gcm listen finished")
 	}()
 
 	return x, nil
