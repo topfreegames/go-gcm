@@ -4,7 +4,6 @@ package gcm
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -84,11 +83,11 @@ type xmppGcmClient struct {
 		sync.RWMutex
 		m map[string]*messageLogEntry
 	}
-	pongs    chan struct{}
-	senderID string
-	isClosed bool
-	once     sync.Once
-	debug    bool
+	pongs      chan struct{}
+	senderID   string
+	isClosed   bool
+	destructor sync.Once
+	debug      bool
 }
 
 // An entry in the messages log, used to keep track of messages pending ack and
@@ -104,7 +103,7 @@ type messageLogEntry struct {
 func newXmppGcmClient(senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
 	nc, err := xmpp.NewClient(xmppAddress, xmppUser(senderID), apiKey, debug)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting client>%v", err)
+		return nil, fmt.Errorf("error connecting xmpp client: %v", err)
 	}
 
 	xc := &xmppGcmClient{
@@ -180,7 +179,7 @@ func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
 }
 
 func (c *xmppGcmClient) gracefulClose() {
-	c.once.Do(func() {
+	c.destructor.Do(func() {
 		log.Debug("xmppGcmClient graceful close started")
 		c.Lock()
 		if c.isClosed {
@@ -214,7 +213,7 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 				break
 			}
 			// This is likely fatal, so return.
-			return fmt.Errorf("error on Recv>%v", err)
+			return fmt.Errorf("error on Recv: %v", err)
 		}
 		switch stanza.(type) {
 		case xmpp.Chat:
@@ -257,6 +256,9 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 					}
 					c.messages.Unlock()
 				}
+			case CCSControl:
+				log.WithField("ccs message", cm).Warn("control message")
+				go h(*cm)
 			default:
 				log.WithField("ccs message", cm).Warn("unknown ccs message")
 			}
@@ -268,19 +270,13 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 				continue
 			}
 			switch cm.MessageType {
-			case CCSControl:
-				// TODO(silvano): create a new connection, drop the old one 'after a while'
-				log.WithField("ccs message", cm).Warn("control message")
-				if cm.Error == "CONNECTION_DRAINING" {
-					c.gracefulClose()
-				}
 			case CCSReceipt:
 				if c.debug {
 					log.WithField("ccs message", cm).Debug("message receipt")
 				}
 				// Receipt message: send ack and pass to listener.
-				origMessageID := strings.TrimPrefix(cm.MessageId, "dr2:")
-				ack := XmppMessage{To: cm.From, MessageId: origMessageID, MessageType: CCSAck}
+				//origMessageID := strings.TrimPrefix(cm.MessageId, "dr2:")
+				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
 				c.send(ack)
 				go h(*cm)
 			default:

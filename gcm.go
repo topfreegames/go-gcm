@@ -80,6 +80,7 @@ func NewClient(senderID string, apiKey string, h MessageHandler, debug bool) (*C
 	// Ping periodically and indentify xmpp disconnect.
 	go c.monitorConnection()
 
+	log.WithField("sender id", senderID).Debug("gcm xmpp client created")
 	return c, nil
 }
 
@@ -107,16 +108,35 @@ func (c *Client) monitorConnection() {
 			break
 		}
 		log.Debug("gcm xmpp ping timed out, creating new xmpp client")
-		newc, err := connectXmpp(c.senderID, c.apiKey, c.mh, c.debug)
-		if err != nil {
-			log.WithField("error", err).Error("error creating xmpp client")
+		if err := c.replaceXmppClient(); err != nil {
+			log.WithField("error", err).Error("error replacing xmpp client")
 			time.Sleep(DefaultPingInterval)
-			continue
 		}
-		oldc := c.xmppClient
-		c.xmppClient = newc
-		oldc.gracefulClose()
 	}
+}
+
+func (c *Client) replaceXmppClient() error {
+	newc, err := connectXmpp(c.senderID, c.apiKey, c.mh, c.debug)
+	if err != nil {
+		log.WithField("error", err).Error("error creating xmpp client")
+		return err
+	}
+	oldc := c.xmppClient
+	c.xmppClient = newc
+	oldc.gracefulClose()
+	go c.monitorConnection()
+	return nil
+}
+
+func (c *Client) onCCSMessage(cm CcsMessage) error {
+	switch cm.MessageType {
+	case CCSControl:
+		if cm.Error == "CONNECTION_DRAINING" {
+			log.WithField("ccs message", cm).Warn("connection draining, creating new xmpp client")
+			return c.replaceXmppClient()
+		}
+	}
+	return c.mh(cm)
 }
 
 func connectXmpp(senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
