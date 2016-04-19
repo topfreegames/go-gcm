@@ -101,6 +101,7 @@ func (c *Client) Close() error {
 	return nil
 }
 
+// Monitors the connection by periodic ping. When ping fails the xmpp client is replaced.
 func (c *Client) monitorConnection() {
 	for {
 		if err := c.xmppClient.pingPeriodically(DefaultPingTimeout, DefaultPingInterval); err == nil {
@@ -115,6 +116,7 @@ func (c *Client) monitorConnection() {
 	}
 }
 
+// Replaces active xmpp client and closes the old one.
 func (c *Client) replaceXmppClient() error {
 	newc, err := connectXmpp(c.senderID, c.apiKey, c.mh, c.debug)
 	if err != nil {
@@ -128,6 +130,8 @@ func (c *Client) replaceXmppClient() error {
 	return nil
 }
 
+// CCS upstream message callback.
+// Replaces active xmpp client when server starts draining the current connection.
 func (c *Client) onCCSMessage(cm CcsMessage) error {
 	switch cm.MessageType {
 	case CCSControl:
@@ -139,6 +143,7 @@ func (c *Client) onCCSMessage(cm CcsMessage) error {
 	return c.mh(cm)
 }
 
+// Creates a new xmpp client, connects to the server and starts listening.
 func connectXmpp(senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
 	x, err := newXmppGcmClient(senderID, apiKey, debug)
 	if err != nil {

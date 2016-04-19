@@ -215,10 +215,10 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 			// This is likely fatal, so return.
 			return fmt.Errorf("error on Recv: %v", err)
 		}
-		switch stanza.(type) {
+		switch v := stanza.(type) {
 		case xmpp.Chat:
 		case xmpp.IQ:
-			if stanza.(xmpp.IQ).Type == "result" {
+			if v.Type == "result" && v.ID == "c2s1" {
 				c.pongs <- struct{}{}
 			}
 			continue
@@ -275,7 +275,6 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 					log.WithField("ccs message", cm).Debug("message receipt")
 				}
 				// Receipt message: send ack and pass to listener.
-				//origMessageID := strings.TrimPrefix(cm.MessageId, "dr2:")
 				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
 				c.send(ack)
 				go h(*cm)
