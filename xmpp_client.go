@@ -300,15 +300,6 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 	if m.MessageId == "" {
 		m.MessageId = uuid.New()
 	}
-	c.messages.Lock()
-	if _, ok := c.messages.m[m.MessageId]; !ok {
-		b := newExponentialBackoff()
-		if b.b.Min < ccsMinBackoff {
-			b.setMin(ccsMinBackoff)
-		}
-		c.messages.m[m.MessageId] = &messageLogEntry{body: &m, backoff: b}
-	}
-	c.messages.Unlock()
 
 	stanza := `<message id=""><gcm xmlns="google:mobile:data">%v</gcm></message>`
 	body, err := json.Marshal(m)
@@ -323,10 +314,31 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 		log.WithField("xmpp payload", payload).Debug("sending xmpp")
 	}
 
+	// For Acks, just send the message.
+	if m.MessageType == CCSAck {
+		// Serialize wire access for thread safety.
+		c.Lock()
+		bytes, err := c.XmppClient.SendOrg(payload)
+		c.Unlock()
+		return m.MessageId, bytes, err
+	}
+
+	// For payload messages, keep them until Ack/Nack is received.
+	c.messages.Lock()
+	if _, ok := c.messages.m[m.MessageId]; !ok {
+		b := newExponentialBackoff()
+		if b.b.Min < ccsMinBackoff {
+			b.setMin(ccsMinBackoff)
+		}
+		c.messages.m[m.MessageId] = &messageLogEntry{body: &m, backoff: b}
+	}
+	c.messages.Unlock()
+
 	// Serialize wire access for thread safety.
 	c.Lock()
 	bytes, err := c.XmppClient.SendOrg(payload)
 	c.Unlock()
+
 	if err != nil {
 		c.messages.Lock()
 		delete(c.messages.m, m.MessageId)
