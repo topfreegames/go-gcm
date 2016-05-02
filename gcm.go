@@ -57,13 +57,14 @@ type Client struct {
 	mh         MessageHandler
 	xmppClient *xmppGcmClient
 	httpClient *httpGcmClient
+	prod       bool
 	debug      bool
 }
 
 // NewClient creates a new GCM client for this senderID.
-func NewClient(senderID string, apiKey string, h MessageHandler, debug bool) (*Client, error) {
+func NewClient(isProd bool, senderID string, apiKey string, h MessageHandler, debug bool) (*Client, error) {
 	ht := newHttpGcmClient(apiKey, debug)
-	xm, err := connectXmpp(senderID, apiKey, h, debug)
+	xm, err := connectXmpp(isProd, senderID, apiKey, h, debug)
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +76,7 @@ func NewClient(senderID string, apiKey string, h MessageHandler, debug bool) (*C
 		xmppClient: xm,
 		httpClient: ht,
 		debug:      debug,
+		prod:       isProd,
 	}
 
 	// Ping periodically and indentify xmpp disconnect.
@@ -118,7 +120,7 @@ func (c *Client) monitorConnection() {
 
 // Replaces active xmpp client and closes the old one.
 func (c *Client) replaceXmppClient() error {
-	newc, err := connectXmpp(c.senderID, c.apiKey, c.mh, c.debug)
+	newc, err := connectXmpp(c.prod, c.senderID, c.apiKey, c.mh, c.debug)
 	if err != nil {
 		log.WithField("error", err).Error("error creating xmpp client")
 		return err
@@ -144,8 +146,8 @@ func (c *Client) onCCSMessage(cm CcsMessage) error {
 }
 
 // Creates a new xmpp client, connects to the server and starts listening.
-func connectXmpp(senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
-	x, err := newXmppGcmClient(senderID, apiKey, debug)
+func connectXmpp(isProd bool, senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
+	x, err := newXmppGcmClient(isProd, senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
 	}

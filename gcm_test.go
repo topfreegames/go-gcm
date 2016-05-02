@@ -207,5 +207,5 @@ func TestCheckResults(t *testing.T) {
 }
 
 func TestXmppUser(t *testing.T) {
-	assertEqual(t, xmppUser("b"), "b@gcm.googleapis.com")
+	assertEqual(t, xmppUser("gcm.googleapis.com", "b"), "b@gcm.googleapis.com")
 }

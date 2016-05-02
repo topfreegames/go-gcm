@@ -169,7 +169,7 @@ func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
 	}
 	err = json.Unmarshal(body, &gcmResp)
 	if err != nil {
-		return gcmResp, fmt.Errorf("error unmarshaling json from body: %v", err)
+		return gcmResp, fmt.Errorf("error unmarshaling json from body: %v %s", err, string(body))
 	}
 	// TODO(silvano): this is assuming that the header contains seconds instead of a date, need to check
 	c.retryAfter = httpResp.Header.Get(http.CanonicalHeaderKey("Retry-After"))

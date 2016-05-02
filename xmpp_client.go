@@ -17,9 +17,10 @@ const (
 	CCSNack     = "nack"
 	CCSControl  = "control"
 	CCSReceipt  = "receipt"
-	xmppHost    = "gcm.googleapis.com"
-	xmppPort    = "5235"
-	xmppAddress = xmppHost + ":" + xmppPort
+	ccsHostProd = "gcm.googleapis.com"
+	ccsPortProd = "5235"
+	ccsHostDev  = "gcm-preprod.googleapis.com"
+	ccsPortDev  = "5236"
 	// For ccs the min for exponential backoff has to be 1 sec
 	ccsMinBackoff = 1 * time.Second
 )
@@ -79,6 +80,7 @@ type xmppClient interface {
 type xmppGcmClient struct {
 	sync.RWMutex
 	XmppClient xmpp.Client
+	xmppHost   string
 	messages   struct {
 		sync.RWMutex
 		m map[string]*messageLogEntry
@@ -100,8 +102,17 @@ type messageLogEntry struct {
 // Factory method for xmppGcmClient, to minimize the number of clients to one per sender id.
 // TODO(silvano): this could be revised, taking into account that we cannot have more than 1000
 // connections per senderId.
-func newXmppGcmClient(senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
-	nc, err := xmpp.NewClient(xmppAddress, xmppUser(senderID), apiKey, debug)
+func newXmppGcmClient(isProd bool, senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
+	var xmppHost, xmppAddress string
+	if isProd {
+		xmppHost = ccsHostProd
+		xmppAddress = ccsHostProd + ":" + ccsPortProd
+	} else {
+		xmppHost = ccsHostDev
+		xmppAddress = ccsHostDev + ":" + ccsPortDev
+	}
+
+	nc, err := xmpp.NewClient(xmppAddress, xmppUser(xmppHost, senderID), apiKey, debug)
 	if err != nil {
 		return nil, fmt.Errorf("error connecting xmpp client: %v", err)
 	}
@@ -114,6 +125,7 @@ func newXmppGcmClient(senderID string, apiKey string, debug bool) (*xmppGcmClien
 		}{
 			m: make(map[string]*messageLogEntry),
 		},
+		xmppHost: xmppHost,
 		senderID: senderID,
 		pongs:    make(chan struct{}),
 		debug:    debug,
@@ -126,7 +138,7 @@ func newXmppGcmClient(senderID string, apiKey string, debug bool) (*xmppGcmClien
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) ping(timeout time.Duration) error {
-	if err := c.XmppClient.PingC2S("", xmppHost); err != nil {
+	if err := c.XmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
 	select {
@@ -365,6 +377,6 @@ func (c *xmppGcmClient) retryMessage(cm CcsMessage, h MessageHandler) {
 }
 
 // xmppUser generates an xmpp username from a sender ID.
-func xmppUser(senderId string) string {
+func xmppUser(xmppHost, senderId string) string {
 	return senderId + "@" + xmppHost
 }
