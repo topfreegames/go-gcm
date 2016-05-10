@@ -102,19 +102,19 @@ type messageLogEntry struct {
 // Factory method for xmppGcmClient, to minimize the number of clients to one per sender id.
 // TODO(silvano): this could be revised, taking into account that we cannot have more than 1000
 // connections per senderId.
-func newXmppGcmClient(isProd bool, senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
+func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
 	var xmppHost, xmppAddress string
-	if isProd {
-		xmppHost = ccsHostProd
-		xmppAddress = ccsHostProd + ":" + ccsPortProd
-	} else {
+	if isSandbox {
 		xmppHost = ccsHostDev
 		xmppAddress = ccsHostDev + ":" + ccsPortDev
+	} else {
+		xmppHost = ccsHostProd
+		xmppAddress = ccsHostProd + ":" + ccsPortProd
 	}
 
 	nc, err := xmpp.NewClient(xmppAddress, xmppUser(xmppHost, senderID), apiKey, debug)
 	if err != nil {
-		return nil, fmt.Errorf("error connecting xmpp client: %v", err)
+		return nil, fmt.Errorf("error connecting gcm xmpp client: %v", err)
 	}
 
 	xc := &xmppGcmClient{
@@ -146,7 +146,7 @@ func (c *xmppGcmClient) ping(timeout time.Duration) error {
 		//if pongID == pingID {
 		return nil
 	case <-time.After(timeout):
-		return fmt.Errorf("xmpp pong timed out after %s", timeout.String())
+		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())
 	}
 }
 
@@ -205,7 +205,7 @@ func (c *xmppGcmClient) gracefulClose() {
 		select {
 		case <-c.waitAllDone():
 		case <-time.After(DefaultPingTimeout):
-			log.Debug("xmpp taking a while to close, so giving up")
+			log.Debug("gcm xmpp taking a while to close, so giving up")
 		}
 
 		c.XmppClient.Close()
@@ -323,7 +323,7 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 	payload := fmt.Sprintf(stanza, bs)
 
 	if c.debug {
-		log.WithField("xmpp payload", payload).Debug("sending xmpp")
+		log.WithField("xmpp payload", payload).Debug("sending gcm xmpp")
 	}
 
 	// For Acks, just send the message.
