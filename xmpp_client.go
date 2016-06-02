@@ -45,7 +45,7 @@ type XmppMessage struct {
 	Priority                 string        `json:"priority,omitempty"`
 	ContentAvailable         bool          `json:"content_available,omitempty"`
 	DelayWhileIdle           bool          `json:"delay_while_idle,omitempty"`
-	TimeToLive               uint          `json:"time_to_live,omitempty"`
+	TimeToLive               *uint         `json:"time_to_live,omitempty"`
 	DeliveryReceiptRequested bool          `json:"delivery_receipt_requested,omitempty"`
 	DryRun                   bool          `json:"dry_run,omitempty"`
 	Data                     Data          `json:"data,omitempty"`
@@ -272,7 +272,7 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 				log.WithField("ccs message", cm).Warn("control message")
 				go h(*cm)
 			default:
-				log.WithField("ccs message", cm).Warn("unknown ccs message")
+				log.WithField("ccs message", cm).Warn("unknown ccs message type")
 			}
 		case "normal":
 			cm := &CcsMessage{}
@@ -291,16 +291,23 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 				c.send(ack)
 				go h(*cm)
 			default:
-				log.WithField("ccs message", cm).Warn("uknown upstream message")
+				log.WithField("ccs message", cm).Warn("uknown css message type")
 				// Upstream message: send ack and pass to listener.
 				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
 				c.send(ack)
 				go h(*cm)
 			}
 		case "error":
-			log.WithField("stanza", v).Warn("error response")
+			log.WithField("stanza", v).Warn("error stanza")
+			cm := &CcsMessage{}
+			err = json.Unmarshal([]byte(v.Other[0]), cm)
+			if err != nil {
+				log.WithField("error", err).Error("unmarshaling ccs message")
+				continue
+			}
+			go h(*cm)
 		default:
-			log.WithField("stanza", v).Warn("error message type")
+			log.WithField("stanza", v).Warn("unknown stanza")
 		}
 	}
 	return nil
