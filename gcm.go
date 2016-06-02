@@ -26,8 +26,8 @@ var (
 	// Default Min and Max delay for backoff.
 	DefaultMinBackoff   = 1 * time.Second
 	DefaultMaxBackoff   = 10 * time.Second
-	DefaultPingInterval = 10 * time.Second
-	DefaultPingTimeout  = 5 * time.Second
+	DefaultPingInterval = 20 * time.Second
+	DefaultPingTimeout  = 15 * time.Second
 )
 
 // The data payload of a GCM message.
@@ -63,21 +63,20 @@ type Client struct {
 
 // NewClient creates a new GCM client for this senderID.
 func NewClient(isSandbox bool, senderID string, apiKey string, h MessageHandler, debug bool) (*Client, error) {
-	ht := newHttpGcmClient(apiKey, debug)
-	xm, err := connectXmpp(isSandbox, senderID, apiKey, h, debug)
+	c := &Client{
+		senderID: senderID,
+		apiKey:   apiKey,
+		mh:       h,
+		debug:    debug,
+		sandbox:  isSandbox,
+	}
+
+	xm, err := connectXmpp(isSandbox, senderID, apiKey, c.onCCSMessage, debug)
 	if err != nil {
 		return nil, err
 	}
-
-	c := &Client{
-		senderID:   senderID,
-		apiKey:     apiKey,
-		mh:         h,
-		xmppClient: xm,
-		httpClient: ht,
-		debug:      debug,
-		sandbox:    isSandbox,
-	}
+	c.xmppClient = xm
+	c.httpClient = newHttpGcmClient(apiKey, debug)
 
 	// Ping periodically and indentify xmpp disconnect.
 	go c.monitorConnection()
@@ -111,7 +110,7 @@ func (c *Client) monitorConnection() {
 			break
 		}
 		log.Debug("gcm xmpp ping timed out, creating new xmpp client")
-		if err := c.replaceXmppClient(); err != nil {
+		if err := c.replaceXmppClient(true); err != nil {
 			log.WithField("error", err).Error("error replacing xmpp client")
 			time.Sleep(DefaultPingInterval)
 		}
@@ -119,29 +118,38 @@ func (c *Client) monitorConnection() {
 }
 
 // Replaces active xmpp client and closes the old one.
-func (c *Client) replaceXmppClient() error {
-	newc, err := connectXmpp(c.sandbox, c.senderID, c.apiKey, c.mh, c.debug)
+func (c *Client) replaceXmppClient(closeOld bool) error {
+	newc, err := connectXmpp(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, c.debug)
 	if err != nil {
 		log.WithField("error", err).Error("error creating xmpp client")
 		return err
 	}
 	oldc := c.xmppClient
 	c.xmppClient = newc
-	oldc.gracefulClose()
 	go c.monitorConnection()
+	if closeOld {
+		oldc.gracefulClose()
+	}
 	return nil
 }
 
 // CCS upstream message callback.
-// Replaces active xmpp client when server starts draining the current connection.
+// Tries to handle what it can here, before bubbling up.
 func (c *Client) onCCSMessage(cm CcsMessage) error {
-	switch cm.MessageType {
-	case CCSControl:
-		if cm.Error == "CONNECTION_DRAINING" {
-			log.WithField("ccs message", cm).Warn("connection draining, creating new xmpp client")
-			return c.replaceXmppClient()
+	switch {
+	case cm.MessageType == CCSNack && cm.Error == "CONNECTION_DRAINING",
+		cm.MessageType == CCSControl && cm.ControlType == "CONNECTION_DRAINING":
+		// Replace active xmpp client when server starts draining the current connection.
+		log.WithField("ccs message", cm).Warn("connection draining, replacing xmpp client")
+		if err := c.replaceXmppClient(false); err != nil {
+			log.WithField("error", err).Error("error replacing xmpp client")
+		}
+		if cm.MessageType == CCSControl {
+			// Don't bubble up, it's not a reply error.
+			return nil
 		}
 	}
+	// Bubble up.
 	return c.mh(cm)
 }
 

@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	httpAddress = "https://android.googleapis.com/gcm/send"
+	httpAddress = "https://gcm-http.googleapis.com/gcm/send"
 )
 
 // A GCM Http message.
@@ -24,7 +24,7 @@ type HttpMessage struct {
 	Priority              string        `json:"priority,omitempty"`
 	ContentAvailable      bool          `json:"content_available,omitempty"`
 	DelayWhileIdle        bool          `json:"delay_while_idle,omitempty"`
-	TimeToLive            uint          `json:"time_to_live,omitempty"`
+	TimeToLive            *uint         `json:"time_to_live,omitempty"`
 	RestrictedPackageName string        `json:"restricted_package_name,omitempty"`
 	DryRun                bool          `json:"dry_run,omitempty"`
 	Data                  Data          `json:"data,omitempty"`
