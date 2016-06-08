@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	httpAddress = "https://gcm-http.googleapis.com/gcm/send"
+	httpAddress = "https://android.googleapis.com/gcm/send"
 )
 
 // A GCM Http message.
