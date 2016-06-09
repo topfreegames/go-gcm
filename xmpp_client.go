@@ -127,7 +127,7 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 		},
 		xmppHost: xmppHost,
 		senderID: senderID,
-		pongs:    make(chan struct{}),
+		pongs:    make(chan struct{}, 100),
 		debug:    debug,
 	}
 
@@ -138,6 +138,8 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) ping(timeout time.Duration) error {
+	// Drain the channel first, because pongs from different connections can be waiting.
+	drain(c.pongs)
 	if err := c.XmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
@@ -147,6 +149,17 @@ func (c *xmppGcmClient) ping(timeout time.Duration) error {
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())
+	}
+}
+
+// drain is a helper to drain a channel.
+func drain(ch chan struct{}) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
 	}
 }
 
