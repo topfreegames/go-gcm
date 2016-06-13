@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	httpAddress = "https://android.googleapis.com/gcm/send"
+	httpAddress = "https://gcm-http.googleapis.com/gcm/send"
 )
 
 // A GCM Http message.
@@ -143,14 +143,14 @@ func (c *httpGcmClient) sendHttp(m HttpMessage, b backoffProvider) (*HttpRespons
 func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
 	bs, err := json.Marshal(m)
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling message>%v", err)
+		return nil, fmt.Errorf("error marshalling message: %v", err)
 	}
 	if c.debug {
 		log.WithField("http request", string(bs)).Debug("gcm http request")
 	}
 	req, err := http.NewRequest("POST", c.GcmURL, bytes.NewReader(bs))
 	if err != nil {
-		return nil, fmt.Errorf("error creating request>%v", err)
+		return nil, fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Add(http.CanonicalHeaderKey("Content-Type"), "application/json")
 	req.Header.Add(http.CanonicalHeaderKey("Authorization"), fmt.Sprintf("key=%v", c.apiKey))
@@ -162,7 +162,7 @@ func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
 	body, err := ioutil.ReadAll(httpResp.Body)
 	defer httpResp.Body.Close()
 	if err != nil {
-		return gcmResp, fmt.Errorf("error reading http response body>%v", err)
+		return gcmResp, fmt.Errorf("error reading http response body: %v", err)
 	}
 	if c.debug {
 		log.WithField("http reply", string(body)).Debug("gcm http reply")

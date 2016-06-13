@@ -4,6 +4,7 @@ package gcm
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
@@ -13,15 +14,17 @@ import (
 )
 
 const (
-	CCSAck      = "ack"
-	CCSNack     = "nack"
-	CCSControl  = "control"
-	CCSReceipt  = "receipt"
+	// XMPP message types.
+	CCSAck     = "ack"
+	CCSNack    = "nack"
+	CCSControl = "control"
+	CCSReceipt = "receipt"
+	// GCM service constants.
 	ccsHostProd = "gcm.googleapis.com"
 	ccsPortProd = "5235"
 	ccsHostDev  = "gcm-preprod.googleapis.com"
 	ccsPortDev  = "5236"
-	// For ccs the min for exponential backoff has to be 1 sec
+	// For CCS the min for exponential backoff has to be 1 sec
 	ccsMinBackoff = 1 * time.Second
 )
 
@@ -79,7 +82,7 @@ type xmppClient interface {
 // xmppGcmClient is a client for the Gcm Xmpp Connection Server (CCS).
 type xmppGcmClient struct {
 	sync.RWMutex
-	XmppClient xmpp.Client
+	xmppClient xmpp.Client
 	xmppHost   string
 	messages   struct {
 		sync.RWMutex
@@ -106,10 +109,10 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 	var xmppHost, xmppAddress string
 	if isSandbox {
 		xmppHost = ccsHostDev
-		xmppAddress = ccsHostDev + ":" + ccsPortDev
+		xmppAddress = net.JoinHostPort(ccsHostDev, ccsPortDev)
 	} else {
 		xmppHost = ccsHostProd
-		xmppAddress = ccsHostProd + ":" + ccsPortProd
+		xmppAddress = net.JoinHostPort(ccsHostProd, ccsPortProd)
 	}
 
 	nc, err := xmpp.NewClient(xmppAddress, xmppUser(xmppHost, senderID), apiKey, debug)
@@ -118,7 +121,7 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 	}
 
 	xc := &xmppGcmClient{
-		XmppClient: *nc,
+		xmppClient: *nc,
 		messages: struct {
 			sync.RWMutex
 			m map[string]*messageLogEntry
@@ -138,28 +141,15 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) ping(timeout time.Duration) error {
-	// Drain the channel first, because pongs from different connections can be waiting.
-	drain(c.pongs)
-	if err := c.XmppClient.PingC2S("", c.xmppHost); err != nil {
+	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
 	select {
 	case <-c.pongs:
-		//if pongID == pingID {
+		// Ping successful.
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())
-	}
-}
-
-// drain is a helper to drain a channel.
-func drain(ch chan struct{}) {
-	for {
-		select {
-		case <-ch:
-		default:
-			return
-		}
 	}
 }
 
@@ -221,7 +211,7 @@ func (c *xmppGcmClient) gracefulClose() {
 			log.Debug("gcm xmpp taking a while to close, so giving up")
 		}
 
-		c.XmppClient.Close()
+		c.xmppClient.Close()
 	})
 }
 
@@ -229,7 +219,7 @@ func (c *xmppGcmClient) gracefulClose() {
 // acks or nacks for messages sent through XMPP, control messages, upstream messages.
 func (c *xmppGcmClient) listen(h MessageHandler) error {
 	for {
-		stanza, err := c.XmppClient.Recv()
+		stanza, err := c.xmppClient.Recv()
 		if err != nil {
 			c.RLock()
 			defer c.RUnlock()
@@ -243,7 +233,8 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 		switch v := stanza.(type) {
 		case xmpp.Chat:
 		case xmpp.IQ:
-			if v.Type == "result" && v.ID == "c2s1" {
+			// See if it's a pong and do not add more than one.
+			if v.Type == "result" && v.ID == "c2s1" && len(c.pongs) == 0 {
 				c.pongs <- struct{}{}
 			}
 			continue
@@ -350,7 +341,7 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 	if m.MessageType == CCSAck {
 		// Serialize wire access for thread safety.
 		c.Lock()
-		bytes, err := c.XmppClient.SendOrg(payload)
+		bytes, err := c.xmppClient.SendOrg(payload)
 		c.Unlock()
 		return m.MessageId, bytes, err
 	}
@@ -368,7 +359,7 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 
 	// Serialize wire access for thread safety.
 	c.Lock()
-	bytes, err := c.XmppClient.SendOrg(payload)
+	bytes, err := c.xmppClient.SendOrg(payload)
 	c.Unlock()
 
 	if err != nil {

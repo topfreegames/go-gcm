@@ -24,10 +24,11 @@ import (
 
 var (
 	// Default Min and Max delay for backoff.
-	DefaultMinBackoff   = 1 * time.Second
-	DefaultMaxBackoff   = 10 * time.Second
+	DefaultMinBackoff = 1 * time.Second
+	DefaultMaxBackoff = 10 * time.Second
+	// Ping interval and timeout.
 	DefaultPingInterval = 20 * time.Second
-	DefaultPingTimeout  = 15 * time.Second
+	DefaultPingTimeout  = 30 * time.Second
 )
 
 // The data payload of a GCM message.
@@ -71,11 +72,14 @@ func NewClient(isSandbox bool, senderID string, apiKey string, h MessageHandler,
 		sandbox:  isSandbox,
 	}
 
+	// Create XMPP client.
 	xm, err := connectXmpp(isSandbox, senderID, apiKey, c.onCCSMessage, debug)
 	if err != nil {
 		return nil, err
 	}
 	c.xmppClient = xm
+
+	// Create HTTP client.
 	c.httpClient = newHttpGcmClient(apiKey, debug)
 
 	// Ping periodically and indentify xmpp disconnect.
@@ -126,7 +130,6 @@ func (c *Client) replaceXmppClient(closeOld bool) error {
 	}
 	oldc := c.xmppClient
 	c.xmppClient = newc
-	go c.monitorConnection()
 	if closeOld {
 		oldc.gracefulClose()
 	}
@@ -136,18 +139,16 @@ func (c *Client) replaceXmppClient(closeOld bool) error {
 // CCS upstream message callback.
 // Tries to handle what it can here, before bubbling up.
 func (c *Client) onCCSMessage(cm CcsMessage) error {
-	switch {
-	case cm.MessageType == CCSNack && cm.Error == "CONNECTION_DRAINING",
-		cm.MessageType == CCSControl && cm.ControlType == "CONNECTION_DRAINING":
-		// Replace active xmpp client when server starts draining the current connection.
-		log.WithField("ccs message", cm).Warn("connection draining, replacing xmpp client")
-		if err := c.replaceXmppClient(false); err != nil {
-			log.WithField("error", err).Error("error replacing xmpp client")
+	// Don't bubble up control message, it's not a reply error.
+	if cm.MessageType == CCSControl {
+		if cm.ControlType == "CONNECTION_DRAINING" {
+			// Server will close the current connection, create a new one.
+			if err := c.replaceXmppClient(false); err != nil {
+				log.WithField("error", err).Error("error replacing xmpp client")
+				return err
+			}
 		}
-		if cm.MessageType == CCSControl {
-			// Don't bubble up, it's not a reply error.
-			return nil
-		}
+		return nil
 	}
 	// Bubble up.
 	return c.mh(cm)
@@ -155,22 +156,22 @@ func (c *Client) onCCSMessage(cm CcsMessage) error {
 
 // Creates a new xmpp client, connects to the server and starts listening.
 func connectXmpp(isSandbox bool, senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
-	x, err := newXmppGcmClient(isSandbox, senderID, apiKey, debug)
+	newc, err := newXmppGcmClient(isSandbox, senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
 	}
 
 	// Start listening on this connection.
 	go func() {
-		if err := x.listen(h); err != nil {
-			// Pass the error upstream.
-			//c.cerr <- err
+		if err := newc.listen(h); err != nil {
+			//TODO:Pass the error upstream.
+			//newc.cerr <- err
 			log.WithField("error", err).Error("gcm listen")
 		}
 		log.Debug("gcm listen finished")
 	}()
 
-	return x, nil
+	return newc, nil
 }
 
 // Implementation of backoff provider using exponential backoff.
