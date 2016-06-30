@@ -176,6 +176,7 @@ func (c *xmppGcmClient) pingPeriodically(timeout, interval time.Duration) error 
 	return nil
 }
 
+// waitAllDone waits until the message store is empty.
 func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
@@ -193,6 +194,8 @@ func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
 	return ch
 }
 
+// gracefulClose sets the closing flag and waits until either all messages are
+// processed or a timeout is reached.
 func (c *xmppGcmClient) gracefulClose() {
 	c.destructor.Do(func() {
 		log.Debug("xmppGcmClient graceful close started")
@@ -317,7 +320,7 @@ func (c *xmppGcmClient) listen(h MessageHandler) error {
 	return nil
 }
 
-//TODO(silvano): add flow control (max 100 pending messages at one time)
+// TODO(silvano): add flow control (max 100 pending messages at one time)
 // xmppGcmClient implementation to send a message through Gcm Xmpp server (ccs).
 func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 	if m.MessageId == "" {
@@ -362,6 +365,7 @@ func (c *xmppGcmClient) send(m XmppMessage) (string, int, error) {
 	bytes, err := c.xmppClient.SendOrg(payload)
 	c.Unlock()
 
+	// If send is not successful, remove the message from the store immediately.
 	if err != nil {
 		c.messages.Lock()
 		delete(c.messages.m, m.MessageId)

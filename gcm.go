@@ -108,13 +108,14 @@ func (c *Client) Close() error {
 
 // Monitors the connection by periodic ping. When ping fails the xmpp client is replaced.
 func (c *Client) monitorConnection() {
+	var err error
 	for {
-		if err := c.xmppClient.pingPeriodically(DefaultPingTimeout, DefaultPingInterval); err == nil {
+		if err = c.xmppClient.pingPeriodically(DefaultPingTimeout, DefaultPingInterval); err == nil {
 			// Closed.
 			break
 		}
-		log.Debug("gcm xmpp ping timed out, creating new xmpp client")
-		if err := c.replaceXmppClient(true); err != nil {
+		log.WithField("error", err).Debug("gcm xmpp ping failed, creating new xmpp client")
+		if err = c.replaceXmppClient(true); err != nil {
 			log.WithField("error", err).Error("error replacing xmpp client")
 			time.Sleep(DefaultPingInterval)
 		}
