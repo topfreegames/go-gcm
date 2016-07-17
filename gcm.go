@@ -62,30 +62,39 @@ type Client struct {
 	debug      bool
 }
 
+// Config is a container for gcm configuration data.
+type Config struct {
+	SenderID          string
+	APIKey            string
+	Sandbox           bool
+	MonitorConnection bool
+	Debug             bool
+}
+
 // NewClient creates a new GCM client for this senderID.
-func NewClient(isSandbox bool, senderID string, apiKey string, h MessageHandler, debug bool) (*Client, error) {
+func NewClient(config *Config, h MessageHandler) (*Client, error) {
 	c := &Client{
-		senderID: senderID,
-		apiKey:   apiKey,
+		senderID: config.SenderID,
+		apiKey:   config.APIKey,
 		mh:       h,
-		debug:    debug,
-		sandbox:  isSandbox,
+		debug:    config.Debug,
+		sandbox:  config.Sandbox,
 	}
 
 	// Create XMPP client.
-	xm, err := connectXmpp(isSandbox, senderID, apiKey, c.onCCSMessage, debug)
+	xm, err := connectXmpp(config.Sandbox, config.SenderID, config.APIKey, c.onCCSMessage, config.Debug)
 	if err != nil {
 		return nil, err
 	}
 	c.xmppClient = xm
 
 	// Create HTTP client.
-	c.httpClient = newHttpGcmClient(apiKey, debug)
+	c.httpClient = newHttpGcmClient(config.APIKey, config.Debug)
 
 	// Ping periodically and indentify xmpp disconnect.
-	go c.monitorConnection()
+	//go c.monitorConnection()
 
-	log.WithField("sender id", senderID).Debug("gcm xmpp client created")
+	log.WithField("sender id", config.SenderID).Debug("gcm xmpp client created")
 	return c, nil
 }
 
