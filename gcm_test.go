@@ -91,14 +91,14 @@ type stubHttpClient struct {
 	Requests      []string
 }
 
-func (c *stubHttpClient) send(message HttpMessage, b backoffProvider) (*HttpResponse, error) {
+func (c *stubHttpClient) Send(message HttpMessage) (*HttpResponse, error) {
 	response := &HttpResponse{}
 	err := json.Unmarshal([]byte(multicastReply[c.InvocationNum]), &response)
 	c.InvocationNum++
 	return response, err
 }
 
-func (c stubHttpClient) getRetryAfter() string {
+func (c stubHttpClient) GetRetryAfter() string {
 	return ""
 }
 
@@ -106,7 +106,7 @@ var singleTargetMessage = &HttpMessage{To: "recipient"}
 var multipleTargetMessage = &HttpMessage{RegistrationIds: multicastTos}
 
 // Test send for http client
-func TestHttpClientSend(t *testing.T) {
+func TestHTTPClientSend(t *testing.T) {
 	expectedRetryAfter := "10"
 	var authHeader string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,7 +125,7 @@ func TestHttpClientSend(t *testing.T) {
 	}
 	httpClient := &http.Client{Transport: transport}
 	c := &httpGcmClient{server.URL, "apiKey", httpClient, "0", true}
-	response, error := c.send(*singleTargetMessage)
+	response, error := c.sendHTTP(*singleTargetMessage)
 	expectedAuthHeader := "key=apiKey"
 	expResp := &HttpResponse{}
 	err := json.Unmarshal([]byte(expectedResp), &expResp)
@@ -135,19 +135,18 @@ func TestHttpClientSend(t *testing.T) {
 	assertEqual(t, authHeader, expectedAuthHeader)
 	assertEqual(t, error, nil)
 	assertDeepEqual(t, response, expResp)
-	assertEqual(t, c.getRetryAfter(), expectedRetryAfter)
+	assertEqual(t, c.GetRetryAfter(), expectedRetryAfter)
 }
 
 // test sending a GCM message through the HTTP connection server (includes backoff)
-func TestSendHttp(t *testing.T) {
+func TestSendHTTP(t *testing.T) {
 	c := &stubHttpClient{}
-	b := &stubBackoff{}
 	expResp := &HttpResponse{}
 	err := json.Unmarshal([]byte(expectedResp), &expResp)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
-	response, err := c.send(*multipleTargetMessage, b)
+	response, err := c.Send(*multipleTargetMessage)
 	assertDeepEqual(t, err, nil)
 	fmt.Println(response)
 	//assertDeepEqual(t, response, expResp)

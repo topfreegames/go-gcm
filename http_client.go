@@ -54,8 +54,8 @@ type multicastResultsState map[string]*Result
 
 // httpClient is an interface to stub the http client in tests.
 type httpClient interface {
-	send(apiKey string, m HttpMessage) (*HttpResponse, error)
-	getRetryAfter() string
+	Send(m HttpMessage) (*HttpResponse, error)
+	GetRetryAfter() string
 }
 
 // httpGcmClient is a client for the Gcm Http Connection Server.
@@ -85,12 +85,13 @@ func newHttpGcmClient(apiKey string, debug bool) *httpGcmClient {
 }
 
 // Get the value of the retry after header if present.
-func (c httpGcmClient) getRetryAfter() string {
+func (c httpGcmClient) GetRetryAfter() string {
 	return c.retryAfter
 }
 
 // sendHttp sends an http message using exponential backoff, handling multicast replies.
-func (c *httpGcmClient) sendHttp(m HttpMessage, b backoffProvider) (*HttpResponse, error) {
+func (c *httpGcmClient) Send(m HttpMessage) (*HttpResponse, error) {
+	b := newExponentialBackoff()
 	// TODO(silvano): check this with responses for topic/notification group
 	gcmResp := &HttpResponse{}
 	var multicastId int
@@ -103,7 +104,7 @@ func (c *httpGcmClient) sendHttp(m HttpMessage, b backoffProvider) (*HttpRespons
 	copy(localTo, targets)
 	resultsState := &multicastResultsState{}
 	for b.sendAnother() {
-		gcmResp, err = c.send(m)
+		gcmResp, err = c.sendHTTP(m)
 		if err != nil {
 			return gcmResp, fmt.Errorf("error sending request to GCM HTTP server: %v", err)
 		}
@@ -114,7 +115,7 @@ func (c *httpGcmClient) sendHttp(m HttpMessage, b backoffProvider) (*HttpRespons
 				return gcmResp, fmt.Errorf("error checking GCM results: %v", err)
 			}
 			if doRetry {
-				retryAfter, err := time.ParseDuration(c.getRetryAfter())
+				retryAfter, err := time.ParseDuration(c.GetRetryAfter())
 				if err != nil {
 					b.setMin(retryAfter)
 				}
@@ -140,7 +141,7 @@ func (c *httpGcmClient) sendHttp(m HttpMessage, b backoffProvider) (*HttpRespons
 }
 
 // httpGcmClient implementation to send a message through GCM Http server.
-func (c *httpGcmClient) send(m HttpMessage) (*HttpResponse, error) {
+func (c *httpGcmClient) sendHTTP(m HttpMessage) (*HttpResponse, error) {
 	bs, err := json.Marshal(m)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling message: %v", err)
