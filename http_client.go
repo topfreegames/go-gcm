@@ -33,7 +33,7 @@ type HttpMessage struct {
 
 // HttpResponse is the GCM connection server response to an HTTP downstream message request.
 type HttpResponse struct {
-	MulticastId  int      `json:"multicast_id,omitempty"`
+	MulticastId  int64    `json:"multicast_id,omitempty"`
 	Success      uint     `json:"success,omitempty"`
 	Failure      uint     `json:"failure,omitempty"`
 	CanonicalIds uint     `json:"canonical_ids,omitempty"`
@@ -94,7 +94,7 @@ func (c *httpGcmClient) Send(m HttpMessage) (*HttpResponse, error) {
 	b := newExponentialBackoff()
 	// TODO(silvano): check this with responses for topic/notification group
 	gcmResp := &HttpResponse{}
-	var multicastId int
+	var multicastId int64
 	targets, err := messageTargetAsStringsArray(m)
 	if err != nil {
 		return gcmResp, fmt.Errorf("error extracting target from message: %v", err)
@@ -179,7 +179,7 @@ func (c *httpGcmClient) sendHTTP(m HttpMessage) (*HttpResponse, error) {
 
 // Builds the final response for a multicast message, in case there have been retries for
 // subsets of the original recipients.
-func buildRespForMulticast(to []string, mrs multicastResultsState, mid int) *HttpResponse {
+func buildRespForMulticast(to []string, mrs multicastResultsState, mid int64) *HttpResponse {
 	resp := &HttpResponse{}
 	resp.MulticastId = mid
 	resp.Results = make([]Result, len(to))

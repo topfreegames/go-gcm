@@ -63,7 +63,7 @@ var multicastReply = []string{`{ "multicast_id": 216,
     { "message_id": "1:2342", "registration_id": "32" },
     { "error": "NotRegistered"}
   ]
-}`, `{ "multicast_id": 217,
+}`, `{ "multicast_id": 123456789012345,
   "success": 2,
   "failure": 0,
   "canonical_ids": 0,
@@ -72,7 +72,7 @@ var multicastReply = []string{`{ "multicast_id": 216,
     { "message_id": "1:1516" }
   ]
 }`}
-var expectedResp = `{"multicast_id": 217,
+var expectedResp = `{"multicast_id": 123456789012345,
   "success": 5,
   "failure": 1,
   "canonical_ids": 1,
