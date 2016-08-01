@@ -62,14 +62,14 @@ type Client interface {
 // gcmClient is a container for http and xmpp GCM clients.
 type gcmClient struct {
 	sync.Mutex
-	Debug      bool
-	senderID   string
-	apiKey     string
-	mh         MessageHandler
-	xmppClient xmppClient
-	httpClient httpClient
-	sandbox    bool
-	debug      bool
+	senderID    string
+	apiKey      string
+	mh          MessageHandler
+	xmppClient  xmppClient
+	httpClient  httpClient
+	sandbox     bool
+	monitorConn bool
+	debug       bool
 }
 
 // Config is a container for gcm configuration data.
@@ -81,30 +81,74 @@ type Config struct {
 	Debug             bool
 }
 
+func init() {
+	log.SetLevel(log.DebugLevel)
+}
+
 // NewClient creates a new GCM client for this senderID.
 func NewClient(config *Config, h MessageHandler) (Client, error) {
 	c := &gcmClient{
-		senderID: config.SenderID,
-		apiKey:   config.APIKey,
-		mh:       h,
-		debug:    config.Debug,
-		sandbox:  config.Sandbox,
+		senderID:    config.SenderID,
+		apiKey:      config.APIKey,
+		mh:          h,
+		debug:       config.Debug,
+		sandbox:     config.Sandbox,
+		monitorConn: config.MonitorConnection,
 	}
 
+	// Create HTTP client.
+	c.httpClient = newHttpGcmClient(config.APIKey, config.Debug)
+
 	// Create XMPP client.
-	xm, err := connectXmpp(config.Sandbox, config.SenderID, config.APIKey, c.onCCSMessage, config.Debug)
+	cerr := make(chan error)
+	xm, err := connectXmpp(config.Sandbox, config.SenderID, config.APIKey, c.onCCSMessage, cerr, config.Debug)
 	if err != nil {
 		return nil, err
 	}
 	c.xmppClient = xm
 
-	// Create HTTP client.
-	c.httpClient = newHttpGcmClient(config.APIKey, config.Debug)
+	l := log.WithField("gcm xmpp client id", c.ID())
 
-	// Ping periodically and indentify xmpp disconnect.
-	//go c.monitorConnection()
+	if config.MonitorConnection {
+		go func() {
+			cerr <- pingPeriodically(c.xmppClient, DefaultPingTimeout, DefaultPingInterval)
+		}()
+	}
 
-	log.WithField("sender id", config.SenderID).Debug("gcm xmpp client created")
+	go func() {
+		for {
+			err = <-cerr
+			close(cerr)
+			l.WithField("error", err).Warn("gcm xmpp connection error")
+
+			// Create a new client.
+			cerr = make(chan error)
+			newc, err := connectXmpp(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, cerr, c.debug)
+			if err != nil {
+				return
+			}
+			// Replace the active client.
+			log.WithField("gcm xmpp client id", c.xmppClient.ID()).Warn("replacing xmpp client")
+			c.Lock()
+			oldc := c.xmppClient
+			c.xmppClient = newc
+			c.Unlock()
+			log.WithFields(log.Fields{"new client id": newc.ID(), "old client id": oldc.ID()}).
+				Warn("replaced gcm xmpp client")
+
+			// Close the old client.
+			go oldc.Close(false)
+
+			if config.MonitorConnection {
+				go func() {
+					cerr <- pingPeriodically(c.xmppClient, DefaultPingTimeout, DefaultPingInterval)
+				}()
+			}
+		}
+	}()
+
+	log.WithFields(log.Fields{"gcm xmpp client id": c.ID(), "sender id": c.senderID}).
+		Debug("gcm xmpp client created")
 	return c, nil
 }
 
@@ -128,79 +172,62 @@ func (c *gcmClient) Close() error {
 	return c.xmppClient.Close(true)
 }
 
-// Monitors the connection by periodic ping. When ping fails the xmpp client is replaced.
-func (c *gcmClient) monitorConnection() {
-	l := log.WithField("sender id", c.senderID)
-	var err error
-	for {
-		if err = c.xmppClient.PingPeriodically(DefaultPingTimeout, DefaultPingInterval); err == nil {
-			// Closed.
-			break
-		}
-		l.WithField("error", err).Warn("gcm xmpp ping failed")
-		if err = c.replaceXmppClient(true); err != nil {
-			l.WithField("error", err).Error("replacing xmpp client")
-			time.Sleep(DefaultPingInterval)
-		}
-	}
-}
+// pingPeriodically sends periodic pings. If pong is received, the timer is reset.
+func pingPeriodically(xm xmppClient, timeout, interval time.Duration) error {
+	t := time.NewTimer(interval)
+	defer t.Stop()
 
-// Replaces active xmpp client and closes the old one.
-func (c *gcmClient) replaceXmppClient(gracefulClose bool) error {
-	log.WithField("sender id", c.senderID).Warn("replacing xmpp client")
-	// Create a new client.
-	newc, err := connectXmpp(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, c.debug)
-	if err != nil {
-		return err
+	for {
+		select {
+		case <-t.C:
+			if xm.IsClosed() {
+				return nil
+			}
+			if err := xm.Ping(timeout); err != nil {
+				return err
+			}
+			t.Reset(interval)
+		}
 	}
-	// Replace the active client.
-	c.Lock()
-	oldc := c.xmppClient
-	c.xmppClient = newc
-	c.Unlock()
-	// Close the old client.
-	oldc.Close(gracefulClose)
 	return nil
 }
 
 // CCS upstream message callback.
 // Tries to handle what it can here, before bubbling up.
 func (c *gcmClient) onCCSMessage(cm CcsMessage) error {
-	l := log.WithField("sender id", c.senderID)
-	// Don't bubble up control message, it's not a reply error.
-	if cm.MessageType == CCSControl {
+	l := log.WithField("gcm xmpp client id", c.ID())
+	switch cm.MessageType {
+	case CCSControl:
+		// Handle connection drainging request.
 		if cm.ControlType == "CONNECTION_DRAINING" {
 			l.Warn("connection draining requested")
-			// Server will close the current connection, create a new one.
-			// Not graceful close, because by this time we receive CONNECTION_DRAINING errors anyway.
-			if err := c.replaceXmppClient(false); err != nil {
-				l.WithField("error", err).Error("replacing xmpp client")
-				return err
-			}
+			// Server will close the current connection, so create a new one.
+			//c.cerr <- "drain"
 		}
+		// Don't bubble up control messages.
 		return nil
+	default:
 	}
 	// Bubble up.
 	return c.mh(cm)
 }
 
 // Creates a new xmpp client, connects to the server and starts listening.
-func connectXmpp(isSandbox bool, senderID string, apiKey string, h MessageHandler, debug bool) (*xmppGcmClient, error) {
-	l := log.WithField("sender id", senderID)
-
+func connectXmpp(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (*xmppGcmClient, error) {
 	newc, err := newXmppGcmClient(isSandbox, senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
 	}
+	l := log.WithField("gcm xmpp client id", newc.ID())
+	l.Debug("created new gcm xmpp client")
 
 	// Start listening on this connection.
 	go func() {
 		if err := newc.Listen(h); err != nil {
-			//TODO:Pass the error upstream.
-			//newc.cerr <- err
-			l.WithField("error", err).Error("gcm listen")
+			l.WithField("error", err).Error("gcm xmpp listen")
+			cerr <- err
 		}
-		l.Debug("gcm listen finished")
+		l.Debug("gcm xmpp listen finished")
 	}()
 
 	return newc, nil
