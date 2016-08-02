@@ -139,6 +139,7 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 	return xc, nil
 }
 
+// IsClosed reports if the client is already closed.
 func (c *xmppGcmClient) IsClosed() bool {
 	c.RLock()
 	closed := c.isClosed
@@ -146,21 +147,21 @@ func (c *xmppGcmClient) IsClosed() bool {
 	return closed
 }
 
-// ping sends a c2s ping message and blocks until s2c pong is received.
+// Ping sends a c2s ping message and blocks until s2c pong is received.
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) Ping(timeout time.Duration) error {
-	log.WithField("id", c.ID()).Debug("------- ping")
+	l := log.WithField("id", c.ID())
+	l.Debug("------- ping")
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
 	select {
 	case <-c.pongs:
-		log.WithField("id", c.ID()).Debug("-- pong")
 		// Ping successful.
+		l.Debug("-- pong")
 		return nil
 	case <-time.After(timeout):
-		log.WithField("id", c.ID()).Debug("-- timeout")
 		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())
 	}
 }
@@ -172,29 +173,31 @@ func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
 		for {
 			// Exit if closed.
 			if c.IsClosed() {
-				close(ch)
 				break
 			}
 			// Exit if done.
 			c.messages.RLock()
 			nm := len(c.messages.m)
 			c.messages.RUnlock()
+			log.WithField("client id", c.ID()).Debugf("waitAllDone messages %d", nm)
 			if nm == 0 {
-				close(ch)
 				break
 			}
+			// Otherwise sleep and retry.
 			time.Sleep(100 * time.Millisecond)
 		}
+		close(ch)
 	}()
 	return ch
 }
 
-// Close sets the closing flag and waits until either all messages are
+// Close sets the closing flag and (if graceful) waits until either all messages are
 // processed or a timeout is reached.
 func (c *xmppGcmClient) Close(graceful bool) error {
 	var err error
+	l := log.WithFields(log.Fields{"client id": c.ID(), "graceful": graceful})
 	c.destructor.Do(func() {
-		log.WithField("graceful", graceful).Debug("xmppGcmClient close started")
+		l.Debug("xmppGcmClient close started")
 		if c.IsClosed() {
 			return
 		}
@@ -207,11 +210,11 @@ func (c *xmppGcmClient) Close(graceful bool) error {
 			select {
 			case <-c.waitAllDone():
 			case <-time.After(DefaultPingTimeout):
-				log.Debug("gcm xmpp taking a while to close, so giving up")
+				l.Debug("gcm xmpp taking a while to close, so giving up")
 			}
 		}
-
 		err = c.xmppClient.Close()
+		l.Debug("xmppGcmClient close finished")
 	})
 
 	return err
