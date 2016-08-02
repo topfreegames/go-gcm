@@ -39,7 +39,7 @@ var (
 	}
 )
 
-// A GCM Xmpp message.
+// XmppMessage is a container for GCM XMPP message.
 type XmppMessage struct {
 	To                       string        `json:"to,omitempty"`
 	MessageId                string        `json:"message_id"`
@@ -55,7 +55,7 @@ type XmppMessage struct {
 	Notification             *Notification `json:"notification,omitempty"`
 }
 
-// CcsMessage is an Xmpp message sent from CCS.
+// CcsMessage is an XMPP message sent from CCS.
 type CcsMessage struct {
 	From             string `json:"from, omitempty"`
 	MessageId        string `json:"message_id, omitempty"`
@@ -78,12 +78,12 @@ type xmppClient interface {
 	Listen(h MessageHandler) error
 	Send(m XmppMessage) (string, int, error)
 	Ping(timeout time.Duration) error
-	PingPeriodically(timeout, interval time.Duration) error
 	Close(graceful bool) error
+	IsClosed() bool
 	ID() string
 }
 
-// xmppGcmClient is a client for the Gcm Xmpp Connection Server (CCS).
+// xmppGcmClient is a client for the GCM XMPP Connection Server (CCS).
 type xmppGcmClient struct {
 	sync.RWMutex
 	xmppClient xmpp.Client
@@ -106,9 +106,7 @@ type messageLogEntry struct {
 	backoff *exponentialBackoff
 }
 
-// Factory method for xmppGcmClient, to minimize the number of clients to one per sender id.
-// TODO(silvano): this could be revised, taking into account that we cannot have more than 1000
-// connections per senderId.
+// newXmppGcmClient creates a new client for GCM XMPP Server (CCS).
 func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
 	var xmppHost, xmppAddress string
 	if isSandbox {
@@ -141,43 +139,31 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 	return xc, nil
 }
 
-// ping sends a c2s ping message and blocks until s2c pong is received.
+// IsClosed reports if the client is already closed.
+func (c *xmppGcmClient) IsClosed() bool {
+	c.RLock()
+	closed := c.isClosed
+	c.RUnlock()
+	return closed
+}
+
+// Ping sends a c2s ping message and blocks until s2c pong is received.
 //
 // Returns error if timeout time passes before pong.
 func (c *xmppGcmClient) Ping(timeout time.Duration) error {
+	l := log.WithField("id", c.ID())
+	l.Debug("------- ping")
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
 	select {
 	case <-c.pongs:
 		// Ping successful.
+		l.Debug("-- pong")
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())
 	}
-}
-
-// pingPeriodically sends periodic pings. If pong is received, the timeout
-// interval is reset, otherwise client close is triggered.
-func (c *xmppGcmClient) PingPeriodically(timeout, interval time.Duration) error {
-	t := time.NewTimer(interval)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-t.C:
-			if err := c.Ping(timeout); err != nil {
-				c.RLock()
-				defer c.RUnlock()
-				if c.isClosed {
-					return nil
-				}
-				return err
-			}
-			t.Reset(interval)
-		}
-	}
-	return nil
 }
 
 // waitAllDone waits until the message store is empty.
@@ -185,30 +171,37 @@ func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
 	ch := make(chan struct{})
 	go func() {
 		for {
+			// Exit if closed.
+			if c.IsClosed() {
+				break
+			}
+			// Exit if done.
 			c.messages.RLock()
 			nm := len(c.messages.m)
 			c.messages.RUnlock()
+			log.WithField("client id", c.ID()).Debugf("waitAllDone messages %d", nm)
 			if nm == 0 {
-				close(ch)
 				break
 			}
-			time.Sleep(200 * time.Millisecond)
+			// Otherwise sleep and retry.
+			time.Sleep(100 * time.Millisecond)
 		}
+		close(ch)
 	}()
 	return ch
 }
 
-// close sets the closing flag and waits until either all messages are
+// Close sets the closing flag and (if graceful) waits until either all messages are
 // processed or a timeout is reached.
 func (c *xmppGcmClient) Close(graceful bool) error {
 	var err error
+	l := log.WithFields(log.Fields{"client id": c.ID(), "graceful": graceful})
 	c.destructor.Do(func() {
-		log.Debug("xmppGcmClient graceful close started")
-		c.Lock()
-		if c.isClosed {
-			c.Unlock()
+		l.Debug("xmppGcmClient close started")
+		if c.IsClosed() {
 			return
 		}
+		c.Lock()
 		c.isClosed = true
 		c.Unlock()
 
@@ -217,11 +210,11 @@ func (c *xmppGcmClient) Close(graceful bool) error {
 			select {
 			case <-c.waitAllDone():
 			case <-time.After(DefaultPingTimeout):
-				log.Debug("gcm xmpp taking a while to close, so giving up")
+				l.Debug("gcm xmpp taking a while to close, so giving up")
 			}
 		}
-
 		err = c.xmppClient.Close()
+		l.Debug("xmppGcmClient close finished")
 	})
 
 	return err
@@ -238,9 +231,7 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 	for {
 		stanza, err := c.xmppClient.Recv()
 		if err != nil {
-			c.RLock()
-			defer c.RUnlock()
-			if c.isClosed {
+			if c.IsClosed() {
 				// Client is closed, return without error.
 				break
 			}
@@ -312,7 +303,7 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 				c.Send(ack)
 				go h(*cm)
 			default:
-				log.WithField("ccs message", cm).Warn("uknown css message type")
+				log.WithField("ccs message", cm).Warn("uknown ccs message type")
 				// Upstream message: send ack and pass to listener.
 				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
 				c.Send(ack)
@@ -344,7 +335,7 @@ func (c *xmppGcmClient) Send(m XmppMessage) (string, int, error) {
 	stanza := `<message id=""><gcm xmlns="google:mobile:data">%v</gcm></message>`
 	body, err := json.Marshal(m)
 	if err != nil {
-		return m.MessageId, 0, fmt.Errorf("could not unmarshal body of xmpp message>%v", err)
+		return m.MessageId, 0, fmt.Errorf("could not unmarshal body of xmpp message: %v", err)
 	}
 	bs := string(body)
 
