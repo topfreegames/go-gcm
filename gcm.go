@@ -25,18 +25,20 @@ import (
 )
 
 var (
-	// Default Min and Max delay for backoff.
+	// DefaultMinBackoff is a default min delay for backoff.
 	DefaultMinBackoff = 1 * time.Second
+	// DefaultMaxBackoff is the default max delay for backoff.
 	DefaultMaxBackoff = 10 * time.Second
-	// Ping interval and timeout.
+	// DefaultPingInterval is a default interval between pings.
 	DefaultPingInterval = 20 * time.Second
-	DefaultPingTimeout  = 30 * time.Second
+	// DefaultPingTimeout is a default time to wait for ping replies.
+	DefaultPingTimeout = 30 * time.Second
 )
 
-// The data payload of a GCM message.
+// Data defines the custom payload of a GCM message.
 type Data map[string]interface{}
 
-// The notification payload of a GCM message.
+// Notification defines the general of a GCM message.
 type Notification struct {
 	Title        string `json:"title,omitempty"`
 	Body         string `json:"body,omitempty"`
@@ -55,8 +57,8 @@ type Notification struct {
 // Client defines an interface for GCM client.
 type Client interface {
 	ID() string
-	SendHTTP(m HttpMessage) (*HttpResponse, error)
-	SendXMPP(m XmppMessage) (string, int, error)
+	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
+	SendXMPP(m XMPPMessage) (string, int, error)
 	Close() error
 }
 
@@ -97,7 +99,7 @@ func NewClient(config *Config, h MessageHandler) (Client, error) {
 	}
 
 	// Create HTTP client.
-	c.httpClient = newHttpGcmClient(config.APIKey, config.Debug)
+	c.httpClient = newHTTPGCMClient(config.APIKey, config.Debug)
 
 	// Create and monitor XMPP client.
 	cerr := make(chan error)
@@ -114,6 +116,31 @@ func NewClient(config *Config, h MessageHandler) (Client, error) {
 	return c, nil
 }
 
+// ID returns XMPP JID of this client.
+func (c *gcmClient) ID() string {
+	return c.xmppClient.ID()
+}
+
+// Send a message using the HTTP GCM connection server.
+func (c *gcmClient) SendHTTP(m HTTPMessage) (*HTTPResponse, error) {
+	return c.httpClient.Send(m)
+}
+
+// SendXmpp sends a message using the XMPP GCM connection server.
+func (c *gcmClient) SendXMPP(m XMPPMessage) (string, int, error) {
+	return c.xmppClient.Send(m)
+}
+
+// Close will stop and close the corresponding client.
+func (c *gcmClient) Close() error {
+	c.Lock()
+	defer c.Unlock()
+	if c.xmppClient != nil {
+		return c.xmppClient.Close(true)
+	}
+	return nil
+}
+
 // createAndMonitorXMPP creates a new GCM XMPP client, replaces the active client,
 // closes the old client and starts monitoring the new connection.
 func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
@@ -128,7 +155,7 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 		}
 
 		// Create XMPP client.
-		newc, err := connectXmpp(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, cerr, c.debug)
+		newc, err := connectXMPP(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, cerr, c.debug)
 		if err != nil {
 			if firstRun {
 				cerr <- err
@@ -169,37 +196,12 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 		}
 		log.WithFields(log.Fields{"client id": newc.ID(), "error": err}).Error("gcm xmpp connection")
 
-		// Close the client before creating a new one.
+		// Close the old client.
 		go newc.Close(true)
 
 		firstRun = false
 	}
 	log.WithField("sender id", c.senderID).Debug("gcm xmpp connection monitor finished")
-}
-
-// ID returns XMPP JID of this client.
-func (c *gcmClient) ID() string {
-	return c.xmppClient.ID()
-}
-
-// Send a message using the HTTP GCM connection server.
-func (c *gcmClient) SendHTTP(m HttpMessage) (*HttpResponse, error) {
-	return c.httpClient.Send(m)
-}
-
-// SendXmpp sends a message using the XMPP GCM connection server.
-func (c *gcmClient) SendXMPP(m XmppMessage) (string, int, error) {
-	return c.xmppClient.Send(m)
-}
-
-// Close will stop and close the corresponding client.
-func (c *gcmClient) Close() error {
-	c.Lock()
-	defer c.Unlock()
-	if c.xmppClient != nil {
-		return c.xmppClient.Close(true)
-	}
-	return nil
 }
 
 // pingPeriodically sends periodic pings. If pong is received, the timer is reset.
@@ -223,7 +225,7 @@ func pingPeriodically(xm xmppClient, timeout, interval time.Duration) error {
 
 // CCS upstream message callback.
 // Tries to handle what it can here, before bubbling up.
-func (c *gcmClient) onCCSMessage(cm CcsMessage) error {
+func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
 	switch cm.MessageType {
 	case CCSControl:
 		// Handle connection drainging request.
@@ -239,8 +241,8 @@ func (c *gcmClient) onCCSMessage(cm CcsMessage) error {
 }
 
 // Creates a new xmpp client, connects to the server and starts listening.
-func connectXmpp(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (*xmppGcmClient, error) {
-	newc, err := newXmppGcmClient(isSandbox, senderID, apiKey, debug)
+func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (*xmppGCMClient, error) {
+	newc, err := newXMPPGCMClient(isSandbox, senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
 	}

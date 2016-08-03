@@ -91,8 +91,8 @@ type stubHttpClient struct {
 	Requests      []string
 }
 
-func (c *stubHttpClient) Send(message HttpMessage) (*HttpResponse, error) {
-	response := &HttpResponse{}
+func (c *stubHttpClient) Send(message HTTPMessage) (*HTTPResponse, error) {
+	response := &HTTPResponse{}
 	err := json.Unmarshal([]byte(multicastReply[c.InvocationNum]), &response)
 	c.InvocationNum++
 	return response, err
@@ -102,8 +102,8 @@ func (c stubHttpClient) GetRetryAfter() string {
 	return ""
 }
 
-var singleTargetMessage = &HttpMessage{To: "recipient"}
-var multipleTargetMessage = &HttpMessage{RegistrationIds: multicastTos}
+var singleTargetMessage = &HTTPMessage{To: "recipient"}
+var multipleTargetMessage = &HTTPMessage{RegistrationIDs: multicastTos}
 
 // Test send for http client
 func TestHTTPClientSend(t *testing.T) {
@@ -124,10 +124,10 @@ func TestHTTPClientSend(t *testing.T) {
 		},
 	}
 	httpClient := &http.Client{Transport: transport}
-	c := &httpGcmClient{server.URL, "apiKey", httpClient, "0", true}
+	c := &httpGCMClient{server.URL, "apiKey", httpClient, "0", true}
 	response, error := c.sendHTTP(*singleTargetMessage)
 	expectedAuthHeader := "key=apiKey"
-	expResp := &HttpResponse{}
+	expResp := &HTTPResponse{}
 	err := json.Unmarshal([]byte(expectedResp), &expResp)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -141,7 +141,7 @@ func TestHTTPClientSend(t *testing.T) {
 // test sending a GCM message through the HTTP connection server (includes backoff)
 func TestSendHTTP(t *testing.T) {
 	c := &stubHttpClient{}
-	expResp := &HttpResponse{}
+	expResp := &HTTPResponse{}
 	err := json.Unmarshal([]byte(expectedResp), &expResp)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -153,17 +153,17 @@ func TestSendHTTP(t *testing.T) {
 }
 
 func TestBuildRespForMulticast(t *testing.T) {
-	expResp := &HttpResponse{}
+	expResp := &HTTPResponse{}
 	err := json.Unmarshal([]byte(multicastReply[0]), &expResp)
 	if err != nil {
 		t.Fatalf("error: %v", err)
 	}
 	resultsState := &multicastResultsState{
-		"4":  &Result{MessageId: "1:0408"},
+		"4":  &Result{MessageID: "1:0408"},
 		"8":  &Result{Error: "Unavailable"},
 		"15": &Result{Error: "InternalServerError"},
-		"16": &Result{MessageId: "1:1517"},
-		"23": &Result{MessageId: "1:2342", RegistrationId: "32"},
+		"16": &Result{MessageID: "1:1517"},
+		"23": &Result{MessageID: "1:2342", RegistrationID: "32"},
 		"42": &Result{Error: "NotRegistered"},
 	}
 	resp := buildRespForMulticast(multicastTos, *resultsState, 216)
@@ -177,14 +177,14 @@ func TestMessageTargetAsStringArray(t *testing.T) {
 	targets, err = messageTargetAsStringsArray(*multipleTargetMessage)
 	assertDeepEqual(t, targets, multicastTos)
 	assertEqual(t, err, nil)
-	invalidMessage := &HttpMessage{}
+	invalidMessage := &HTTPMessage{}
 	targets, err = messageTargetAsStringsArray(*invalidMessage)
 	assertDeepEqual(t, targets, []string{})
-	assertEqual(t, "can't find any valid target field in message.", err.Error())
+	assertEqual(t, "cannot find any valid target field in message", err.Error())
 }
 
 func TestCheckResults(t *testing.T) {
-	response := &HttpResponse{}
+	response := &HTTPResponse{}
 	err := json.Unmarshal([]byte(multicastReply[0]), &response)
 	if err != nil {
 		t.Fatalf("error: %v", err)
@@ -195,11 +195,11 @@ func TestCheckResults(t *testing.T) {
 	assertEqual(t, doRetry, true)
 	assertDeepEqual(t, toRetry, expectedToRetry)
 	expectedResultState := &multicastResultsState{
-		"4":  &Result{MessageId: "1:0408"},
+		"4":  &Result{MessageID: "1:0408"},
 		"8":  &Result{Error: "Unavailable"},
 		"15": &Result{Error: "InternalServerError"},
-		"16": &Result{MessageId: "1:1517"},
-		"23": &Result{MessageId: "1:2342", RegistrationId: "32"},
+		"16": &Result{MessageID: "1:1517"},
+		"23": &Result{MessageID: "1:2342", RegistrationID: "32"},
 		"42": &Result{Error: "NotRegistered"},
 	}
 	assertDeepEqual(t, resultsState, expectedResultState)

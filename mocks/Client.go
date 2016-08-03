@@ -37,20 +37,20 @@ func (_m *Client) ID() string {
 }
 
 // SendHTTP provides a mock function with given fields: m
-func (_m *Client) SendHTTP(m gcm.HttpMessage) (*gcm.HttpResponse, error) {
+func (_m *Client) SendHTTP(m gcm.HTTPMessage) (*gcm.HTTPResponse, error) {
 	ret := _m.Called(m)
 
-	var r0 *gcm.HttpResponse
-	if rf, ok := ret.Get(0).(func(gcm.HttpMessage) *gcm.HttpResponse); ok {
+	var r0 *gcm.HTTPResponse
+	if rf, ok := ret.Get(0).(func(gcm.HTTPMessage) *gcm.HTTPResponse); ok {
 		r0 = rf(m)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*gcm.HttpResponse)
+			r0 = ret.Get(0).(*gcm.HTTPResponse)
 		}
 	}
 
 	var r1 error
-	if rf, ok := ret.Get(1).(func(gcm.HttpMessage) error); ok {
+	if rf, ok := ret.Get(1).(func(gcm.HTTPMessage) error); ok {
 		r1 = rf(m)
 	} else {
 		r1 = ret.Error(1)
@@ -60,25 +60,25 @@ func (_m *Client) SendHTTP(m gcm.HttpMessage) (*gcm.HttpResponse, error) {
 }
 
 // SendXMPP provides a mock function with given fields: m
-func (_m *Client) SendXMPP(m gcm.XmppMessage) (string, int, error) {
+func (_m *Client) SendXMPP(m gcm.XMPPMessage) (string, int, error) {
 	ret := _m.Called(m)
 
 	var r0 string
-	if rf, ok := ret.Get(0).(func(gcm.XmppMessage) string); ok {
+	if rf, ok := ret.Get(0).(func(gcm.XMPPMessage) string); ok {
 		r0 = rf(m)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
 	var r1 int
-	if rf, ok := ret.Get(1).(func(gcm.XmppMessage) int); ok {
+	if rf, ok := ret.Get(1).(func(gcm.XMPPMessage) int); ok {
 		r1 = rf(m)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
 
 	var r2 error
-	if rf, ok := ret.Get(2).(func(gcm.XmppMessage) error); ok {
+	if rf, ok := ret.Get(2).(func(gcm.XMPPMessage) error); ok {
 		r2 = rf(m)
 	} else {
 		r2 = ret.Error(2)

@@ -39,10 +39,10 @@ var (
 	}
 )
 
-// XmppMessage is a container for GCM XMPP message.
-type XmppMessage struct {
+// XMPPMessage is a container for GCM XMPP message.
+type XMPPMessage struct {
 	To                       string        `json:"to,omitempty"`
-	MessageId                string        `json:"message_id"`
+	MessageID                string        `json:"message_id"`
 	MessageType              string        `json:"message_type,omitempty"`
 	CollapseKey              string        `json:"collapse_key,omitempty"`
 	Priority                 string        `json:"priority,omitempty"`
@@ -55,12 +55,12 @@ type XmppMessage struct {
 	Notification             *Notification `json:"notification,omitempty"`
 }
 
-// CcsMessage is an XMPP message sent from CCS.
-type CcsMessage struct {
+// CCSMessage is an XMPP message sent from CCS.
+type CCSMessage struct {
 	From             string `json:"from, omitempty"`
-	MessageId        string `json:"message_id, omitempty"`
+	MessageID        string `json:"message_id, omitempty"`
 	MessageType      string `json:"message_type, omitempty"`
-	RegistrationId   string `json:"registration_id,omitempty"`
+	RegistrationID   string `json:"registration_id,omitempty"`
 	Error            string `json:"error,omitempty"`
 	ErrorDescription string `json:"error_description,omitempty"`
 	Category         string `json:"category, omitempty"`
@@ -71,12 +71,12 @@ type CcsMessage struct {
 // MessageHandler is the type for a function that handles a CCS message.
 // The CCS message can be an upstream message (device to server) or a
 // message from CCS (e.g. a delivery receipt).
-type MessageHandler func(cm CcsMessage) error
+type MessageHandler func(cm CCSMessage) error
 
 // xmppClient is an interface to stub the xmpp client in tests.
 type xmppClient interface {
 	Listen(h MessageHandler) error
-	Send(m XmppMessage) (string, int, error)
+	Send(m XMPPMessage) (string, int, error)
 	Ping(timeout time.Duration) error
 	Close(graceful bool) error
 	IsClosed() bool
@@ -84,7 +84,7 @@ type xmppClient interface {
 }
 
 // xmppGcmClient is a client for the GCM XMPP Connection Server (CCS).
-type xmppGcmClient struct {
+type xmppGCMClient struct {
 	sync.RWMutex
 	xmppClient xmpp.Client
 	xmppHost   string
@@ -102,12 +102,12 @@ type xmppGcmClient struct {
 // An entry in the messages log, used to keep track of messages pending ack and
 // retries for failed messages.
 type messageLogEntry struct {
-	body    *XmppMessage
+	body    *XMPPMessage
 	backoff *exponentialBackoff
 }
 
 // newXmppGcmClient creates a new client for GCM XMPP Server (CCS).
-func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool) (*xmppGcmClient, error) {
+func newXMPPGCMClient(isSandbox bool, senderID string, apiKey string, debug bool) (*xmppGCMClient, error) {
 	var xmppHost, xmppAddress string
 	if isSandbox {
 		xmppHost = ccsHostDev
@@ -122,7 +122,7 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 		return nil, fmt.Errorf("error connecting gcm xmpp client: %v", err)
 	}
 
-	xc := &xmppGcmClient{
+	xc := &xmppGCMClient{
 		xmppClient: *nc,
 		messages: struct {
 			sync.RWMutex
@@ -140,7 +140,7 @@ func newXmppGcmClient(isSandbox bool, senderID string, apiKey string, debug bool
 }
 
 // IsClosed reports if the client is already closed.
-func (c *xmppGcmClient) IsClosed() bool {
+func (c *xmppGCMClient) IsClosed() bool {
 	c.RLock()
 	closed := c.isClosed
 	c.RUnlock()
@@ -150,7 +150,7 @@ func (c *xmppGcmClient) IsClosed() bool {
 // Ping sends a c2s ping message and blocks until s2c pong is received.
 //
 // Returns error if timeout time passes before pong.
-func (c *xmppGcmClient) Ping(timeout time.Duration) error {
+func (c *xmppGCMClient) Ping(timeout time.Duration) error {
 	l := log.WithField("id", c.ID())
 	l.Debug("------- ping")
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
@@ -166,38 +166,14 @@ func (c *xmppGcmClient) Ping(timeout time.Duration) error {
 	}
 }
 
-// waitAllDone waits until the message store is empty.
-func (c *xmppGcmClient) waitAllDone() <-chan struct{} {
-	ch := make(chan struct{})
-	go func() {
-		for {
-			// Exit if closed.
-			if c.IsClosed() {
-				break
-			}
-			// Exit if done.
-			c.messages.RLock()
-			nm := len(c.messages.m)
-			c.messages.RUnlock()
-			log.WithField("client id", c.ID()).Debugf("waitAllDone messages %d", nm)
-			if nm == 0 {
-				break
-			}
-			// Otherwise sleep and retry.
-			time.Sleep(100 * time.Millisecond)
-		}
-		close(ch)
-	}()
-	return ch
-}
-
 // Close sets the closing flag and (if graceful) waits until either all messages are
 // processed or a timeout is reached.
-func (c *xmppGcmClient) Close(graceful bool) error {
+func (c *xmppGCMClient) Close(graceful bool) error {
 	var err error
 	l := log.WithFields(log.Fields{"client id": c.ID(), "graceful": graceful})
 	c.destructor.Do(func() {
 		l.Debug("xmppGcmClient close started")
+		defer l.Debug("xmppGcmClient close finished")
 		if c.IsClosed() {
 			return
 		}
@@ -214,20 +190,19 @@ func (c *xmppGcmClient) Close(graceful bool) error {
 			}
 		}
 		err = c.xmppClient.Close()
-		l.Debug("xmppGcmClient close finished")
 	})
 
 	return err
 }
 
 // ID returns the identifier of this XMPP client.
-func (c *xmppGcmClient) ID() string {
+func (c *xmppGCMClient) ID() string {
 	return c.xmppClient.JID()
 }
 
 // xmppGcmClient implementation of listening for messages from CCS; the messages can be
 // acks or nacks for messages sent through XMPP, control messages, upstream messages.
-func (c *xmppGcmClient) Listen(h MessageHandler) error {
+func (c *xmppGCMClient) Listen(h MessageHandler) error {
 	for {
 		stanza, err := c.xmppClient.Recv()
 		if err != nil {
@@ -253,7 +228,7 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 		v := stanza.(xmpp.Chat)
 		switch v.Type {
 		case "":
-			cm := &CcsMessage{}
+			cm := &CCSMessage{}
 			err = json.Unmarshal([]byte(v.Other[0]), cm)
 			if err != nil {
 				log.WithField("error", err).Error("unmarshaling ccs message")
@@ -263,9 +238,9 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 			case CCSAck:
 				c.messages.Lock()
 				// ack for a sent message, delete it from log.
-				if _, ok := c.messages.m[cm.MessageId]; ok {
+				if _, ok := c.messages.m[cm.MessageID]; ok {
 					go h(*cm)
-					delete(c.messages.m, cm.MessageId)
+					delete(c.messages.m, cm.MessageID)
 				}
 				c.messages.Unlock()
 			case CCSNack:
@@ -274,9 +249,9 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 					c.retryMessage(*cm, h)
 				} else {
 					c.messages.Lock()
-					if _, ok := c.messages.m[cm.MessageId]; ok {
+					if _, ok := c.messages.m[cm.MessageID]; ok {
 						go h(*cm)
-						delete(c.messages.m, cm.MessageId)
+						delete(c.messages.m, cm.MessageID)
 					}
 					c.messages.Unlock()
 				}
@@ -287,7 +262,7 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 				log.WithField("ccs message", cm).Warn("unknown ccs message type")
 			}
 		case "normal":
-			cm := &CcsMessage{}
+			cm := &CCSMessage{}
 			err = json.Unmarshal([]byte(v.Other[0]), cm)
 			if err != nil {
 				log.WithField("error", err).Error("unmarshaling ccs message")
@@ -299,19 +274,19 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 					log.WithField("ccs message", cm).Debug("message receipt")
 				}
 				// Receipt message: send ack and pass to listener.
-				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
+				ack := XMPPMessage{To: cm.From, MessageID: cm.MessageID, MessageType: CCSAck}
 				c.Send(ack)
 				go h(*cm)
 			default:
 				log.WithField("ccs message", cm).Warn("uknown ccs message type")
 				// Upstream message: send ack and pass to listener.
-				ack := XmppMessage{To: cm.From, MessageId: cm.MessageId, MessageType: CCSAck}
+				ack := XMPPMessage{To: cm.From, MessageID: cm.MessageID, MessageType: CCSAck}
 				c.Send(ack)
 				go h(*cm)
 			}
 		case "error":
 			log.WithField("stanza", v).Warn("error stanza")
-			cm := &CcsMessage{}
+			cm := &CCSMessage{}
 			err = json.Unmarshal([]byte(v.Other[0]), cm)
 			if err != nil {
 				log.WithField("error", err).Error("unmarshaling ccs message")
@@ -327,15 +302,15 @@ func (c *xmppGcmClient) Listen(h MessageHandler) error {
 
 // TODO(silvano): add flow control (max 100 pending messages at one time)
 // xmppGcmClient implementation to send a message through Gcm Xmpp server (ccs).
-func (c *xmppGcmClient) Send(m XmppMessage) (string, int, error) {
-	if m.MessageId == "" {
-		m.MessageId = uuid.New()
+func (c *xmppGCMClient) Send(m XMPPMessage) (string, int, error) {
+	if m.MessageID == "" {
+		m.MessageID = uuid.New()
 	}
 
 	stanza := `<message id=""><gcm xmlns="google:mobile:data">%v</gcm></message>`
 	body, err := json.Marshal(m)
 	if err != nil {
-		return m.MessageId, 0, fmt.Errorf("could not unmarshal body of xmpp message: %v", err)
+		return m.MessageID, 0, fmt.Errorf("could not unmarshal body of xmpp message: %v", err)
 	}
 	bs := string(body)
 
@@ -351,17 +326,17 @@ func (c *xmppGcmClient) Send(m XmppMessage) (string, int, error) {
 		c.Lock()
 		bytes, err := c.xmppClient.SendOrg(payload)
 		c.Unlock()
-		return m.MessageId, bytes, err
+		return m.MessageID, bytes, err
 	}
 
 	// For payload messages, keep them until Ack/Nack is received.
 	c.messages.Lock()
-	if _, ok := c.messages.m[m.MessageId]; !ok {
+	if _, ok := c.messages.m[m.MessageID]; !ok {
 		b := newExponentialBackoff()
 		if b.b.Min < ccsMinBackoff {
 			b.setMin(ccsMinBackoff)
 		}
-		c.messages.m[m.MessageId] = &messageLogEntry{body: &m, backoff: b}
+		c.messages.m[m.MessageID] = &messageLogEntry{body: &m, backoff: b}
 	}
 	c.messages.Unlock()
 
@@ -373,17 +348,41 @@ func (c *xmppGcmClient) Send(m XmppMessage) (string, int, error) {
 	// If send is not successful, remove the message from the store immediately.
 	if err != nil {
 		c.messages.Lock()
-		delete(c.messages.m, m.MessageId)
+		delete(c.messages.m, m.MessageID)
 		c.messages.Unlock()
 	}
-	return m.MessageId, bytes, err
+	return m.MessageID, bytes, err
+}
+
+// waitAllDone waits until the message store is empty.
+func (c *xmppGCMClient) waitAllDone() <-chan struct{} {
+	ch := make(chan struct{})
+	go func() {
+		for {
+			// Exit if closed.
+			if c.IsClosed() {
+				break
+			}
+			// Exit if done.
+			c.messages.RLock()
+			nm := len(c.messages.m)
+			c.messages.RUnlock()
+			if nm == 0 {
+				break
+			}
+			// Otherwise sleep and retry.
+			time.Sleep(100 * time.Millisecond)
+		}
+		close(ch)
+	}()
+	return ch
 }
 
 // Retry sending an xmpp message with exponential backoff; if over limit, bubble up the failed message.
-func (c *xmppGcmClient) retryMessage(cm CcsMessage, h MessageHandler) {
+func (c *xmppGCMClient) retryMessage(cm CCSMessage, h MessageHandler) {
 	c.messages.RLock()
 	defer c.messages.RUnlock()
-	if me, ok := c.messages.m[cm.MessageId]; ok {
+	if me, ok := c.messages.m[cm.MessageID]; ok {
 		if me.backoff.sendAnother() {
 			go func(m *messageLogEntry) {
 				m.backoff.wait()
@@ -397,6 +396,6 @@ func (c *xmppGcmClient) retryMessage(cm CcsMessage, h MessageHandler) {
 }
 
 // xmppUser generates an xmpp username from a sender ID.
-func xmppUser(xmppHost, senderId string) string {
-	return senderId + "@" + xmppHost
+func xmppUser(xmppHost, senderID string) string {
+	return senderID + "@" + xmppHost
 }
