@@ -16,11 +16,8 @@
 package gcm
 
 import (
-	"errors"
-	"sync"
 	"time"
 
-	log "github.com/Sirupsen/logrus"
 	"github.com/jpillora/backoff"
 )
 
@@ -35,10 +32,52 @@ var (
 	DefaultPingTimeout = 30 * time.Second
 )
 
+// HTTPMessage defines a downstream GCM HTTP message.
+type HTTPMessage struct {
+	To                    string        `json:"to,omitempty"`
+	RegistrationIDs       []string      `json:"registration_ids,omitempty"`
+	CollapseKey           string        `json:"collapse_key,omitempty"`
+	Priority              string        `json:"priority,omitempty"`
+	ContentAvailable      bool          `json:"content_available,omitempty"`
+	DelayWhileIdle        bool          `json:"delay_while_idle,omitempty"`
+	TimeToLive            *uint         `json:"time_to_live,omitempty"`
+	RestrictedPackageName string        `json:"restricted_package_name,omitempty"`
+	DryRun                bool          `json:"dry_run,omitempty"`
+	Data                  Data          `json:"data,omitempty"`
+	Notification          *Notification `json:"notification,omitempty"`
+}
+
+// HTTPResponse is the GCM connection server response to an HTTP downstream message.
+type HTTPResponse struct {
+	MulticastID  int64        `json:"multicast_id,omitempty"`
+	Success      uint         `json:"success,omitempty"`
+	Failure      uint         `json:"failure,omitempty"`
+	CanonicalIds uint         `json:"canonical_ids,omitempty"`
+	Results      []httpResult `json:"results,omitempty"`
+	MessageID    uint         `json:"message_id,omitempty"`
+	Error        string       `json:"error,omitempty"`
+}
+
+// XMPPMessage defines a downstream GCM XMPP message.
+type XMPPMessage struct {
+	To                       string        `json:"to,omitempty"`
+	MessageID                string        `json:"message_id"`
+	MessageType              string        `json:"message_type,omitempty"`
+	CollapseKey              string        `json:"collapse_key,omitempty"`
+	Priority                 string        `json:"priority,omitempty"`
+	ContentAvailable         bool          `json:"content_available,omitempty"`
+	DelayWhileIdle           bool          `json:"delay_while_idle,omitempty"`
+	TimeToLive               *uint         `json:"time_to_live,omitempty"`
+	DeliveryReceiptRequested bool          `json:"delivery_receipt_requested,omitempty"`
+	DryRun                   bool          `json:"dry_run,omitempty"`
+	Data                     Data          `json:"data,omitempty"`
+	Notification             *Notification `json:"notification,omitempty"`
+}
+
 // Data defines the custom payload of a GCM message.
 type Data map[string]interface{}
 
-// Notification defines the general of a GCM message.
+// Notification defines the notification payload of a GCM message.
 type Notification struct {
 	Title        string `json:"title,omitempty"`
 	Body         string `json:"body,omitempty"`
@@ -54,27 +93,6 @@ type Notification struct {
 	TitleLocKey  string `json:"title_loc_key,omitempty"`
 }
 
-// Client defines an interface for GCM client.
-type Client interface {
-	ID() string
-	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
-	SendXMPP(m XMPPMessage) (string, int, error)
-	Close() error
-}
-
-// gcmClient is a container for http and xmpp GCM clients.
-type gcmClient struct {
-	sync.Mutex
-	senderID   string
-	apiKey     string
-	mh         MessageHandler
-	xmppClient xmppClient
-	httpClient httpClient
-	cerr       chan error
-	sandbox    bool
-	debug      bool
-}
-
 // Config is a container for gcm configuration data.
 type Config struct {
 	SenderID          string
@@ -84,180 +102,54 @@ type Config struct {
 	Debug             bool
 }
 
-// NewClient creates a new GCM client for this senderID.
-func NewClient(config *Config, h MessageHandler) (Client, error) {
-	c := &gcmClient{
-		senderID: config.SenderID,
-		apiKey:   config.APIKey,
-		mh:       h,
-		debug:    config.Debug,
-		sandbox:  config.Sandbox,
-	}
-
-	if c.debug {
-		log.SetLevel(log.DebugLevel)
-	}
-
-	// Create HTTP client.
-	c.httpClient = newHTTPGCMClient(config.APIKey, config.Debug)
-
-	// Create and monitor XMPP client.
-	cerr := make(chan error)
-	go c.createAndMonitorXMPP(config.MonitorConnection, cerr)
-
-	// Wait a bit to see if the newly created client is ok.
-	select {
-	case err := <-cerr:
-		return nil, err
-	case <-time.After(time.Second):
-		// Looks good.
-	}
-
-	return c, nil
+// CCSMessage is an XMPP message sent from CCS.
+// The CCS message can be an upstream message (device to server) or a
+// message from CCS (e.g. a delivery receipt, a control, etc).
+type CCSMessage struct {
+	From             string `json:"from, omitempty"`
+	MessageID        string `json:"message_id, omitempty"`
+	MessageType      string `json:"message_type, omitempty"`
+	RegistrationID   string `json:"registration_id,omitempty"`
+	Error            string `json:"error,omitempty"`
+	ErrorDescription string `json:"error_description,omitempty"`
+	Category         string `json:"category, omitempty"`
+	Data             Data   `json:"data,omitempty"`
+	ControlType      string `json:"control_type,omitempty"`
 }
 
-// ID returns XMPP JID of this client.
-func (c *gcmClient) ID() string {
-	return c.xmppClient.ID()
+// MessageHandler is the type for a function that handles a CCS message.
+type MessageHandler func(cm CCSMessage) error
+
+// Client defines an interface for GCM client.
+type Client interface {
+	ID() string
+	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
+	SendXMPP(m XMPPMessage) (string, int, error)
+	Close() error
 }
 
-// Send a message using the HTTP GCM connection server.
-func (c *gcmClient) SendHTTP(m HTTPMessage) (*HTTPResponse, error) {
-	return c.httpClient.Send(m)
+// httpClient is an interface to stub the internal http client in tests.
+type httpClient interface {
+	send(m HTTPMessage) (*HTTPResponse, error)
+	getRetryAfter() string
 }
 
-// SendXmpp sends a message using the XMPP GCM connection server.
-func (c *gcmClient) SendXMPP(m XMPPMessage) (string, int, error) {
-	return c.xmppClient.Send(m)
+// xmppClient is an interface to stub the internal xmpp client in tests.
+type xmppClient interface {
+	listen(h MessageHandler) error
+	send(m XMPPMessage) (string, int, error)
+	ping(timeout time.Duration) error
+	close(graceful bool) error
+	isClosed() bool
+	ID() string
 }
 
-// Close will stop and close the corresponding client.
-func (c *gcmClient) Close() error {
-	c.Lock()
-	defer c.Unlock()
-	if c.xmppClient != nil {
-		return c.xmppClient.Close(true)
-	}
-	return nil
-}
-
-// createAndMonitorXMPP creates a new GCM XMPP client, replaces the active client,
-// closes the old client and starts monitoring the new connection.
-func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
-	firstRun := true
-	for {
-		// On the first run, send the error upstream.
-		var cerr chan error
-		if firstRun {
-			cerr = xcerr
-		} else {
-			cerr = make(chan error)
-		}
-
-		// Create XMPP client.
-		newc, err := connectXMPP(c.sandbox, c.senderID, c.apiKey, c.onCCSMessage, cerr, c.debug)
-		if err != nil {
-			if firstRun {
-				cerr <- err
-				break
-			}
-			log.WithFields(log.Fields{"sender id": c.senderID, "error": err}).Error("connect gcm xmpp")
-			// Wait and try again.
-			time.Sleep(DefaultPingTimeout)
-			continue
-		}
-
-		// Replace the active client.
-		c.Lock()
-		oldc := c.xmppClient
-		c.xmppClient = newc
-		c.cerr = cerr
-		c.Unlock()
-
-		if firstRun {
-			log.WithField("client id", newc.ID()).Debug("created gcm xmpp client")
-		} else {
-			log.WithFields(log.Fields{"new client id": newc.ID(), "old client id": oldc.ID()}).
-				Debug("replaced gcm xmpp client")
-		}
-
-		// If active monitoring is enabled, start pinging routine.
-		if activeMonitor {
-			go func() {
-				cerr <- pingPeriodically(newc, DefaultPingTimeout, DefaultPingInterval)
-			}()
-		}
-
-		// Wait for an error to occur (from listen or ping).
-		err = <-cerr
-		if err == nil {
-			// Active close.
-			break
-		}
-		log.WithFields(log.Fields{"client id": newc.ID(), "error": err}).Error("gcm xmpp connection")
-
-		// Close the old client.
-		go newc.Close(true)
-
-		firstRun = false
-	}
-	log.WithField("sender id", c.senderID).Debug("gcm xmpp connection monitor finished")
-}
-
-// pingPeriodically sends periodic pings. If pong is received, the timer is reset.
-func pingPeriodically(xm xmppClient, timeout, interval time.Duration) error {
-	t := time.NewTimer(interval)
-	defer t.Stop()
-
-	for {
-		select {
-		case <-t.C:
-			if xm.IsClosed() {
-				return nil
-			}
-			if err := xm.Ping(timeout); err != nil {
-				return err
-			}
-			t.Reset(interval)
-		}
-	}
-}
-
-// CCS upstream message callback.
-// Tries to handle what it can here, before bubbling up.
-func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
-	switch cm.MessageType {
-	case CCSControl:
-		// Handle connection drainging request.
-		if cm.ControlType == "CONNECTION_DRAINING" {
-			// Server should close the current connection.
-			c.cerr <- errors.New("connection draining")
-		}
-		// Don't bubble up control messages.
-		return nil
-	}
-	// Bubble up.
-	return c.mh(cm)
-}
-
-// Creates a new xmpp client, connects to the server and starts listening.
-func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (*xmppGCMClient, error) {
-	newc, err := newXMPPGCMClient(isSandbox, senderID, apiKey, debug)
-	if err != nil {
-		return nil, err
-	}
-	l := log.WithField("client id", newc.ID())
-
-	// Start listening on this connection.
-	go func() {
-		if err := newc.Listen(h); err != nil {
-			l.WithField("error", err).Error("gcm xmpp listen")
-			cerr <- err
-		}
-		l.Debug("gcm xmpp listen finished")
-	}()
-
-	return newc, nil
+// backoffProvider defines an interface for backoff.
+type backoffProvider interface {
+	sendAnother() bool
+	getMin() time.Duration
+	setMin(min time.Duration)
+	wait()
 }
 
 // Implementation of backoff provider using exponential backoff.
@@ -268,7 +160,7 @@ type exponentialBackoff struct {
 
 // Factory method for exponential backoff, uses default values for Min and Max and
 // adds Jitter.
-func newExponentialBackoff() *exponentialBackoff {
+func newExponentialBackoff() backoffProvider {
 	b := &backoff.Backoff{
 		Min:    DefaultMinBackoff,
 		Max:    DefaultMaxBackoff,
@@ -280,6 +172,10 @@ func newExponentialBackoff() *exponentialBackoff {
 // Returns true if not over the retries limit
 func (eb exponentialBackoff) sendAnother() bool {
 	return eb.currentDelay <= eb.b.Max
+}
+
+func (eb *exponentialBackoff) getMin() time.Duration {
+	return eb.b.Min
 }
 
 // Set the minumim delay for backoff

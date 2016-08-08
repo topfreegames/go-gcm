@@ -15,196 +15,103 @@
 package gcm
 
 import (
-	"encoding/json"
-	"fmt"
-	"net/http"
-	"net/http/httptest"
-	"net/url"
-	"reflect"
+	"errors"
 	"testing"
-	"time"
+
+	. "github.com/onsi/ginkgo"
+	. "github.com/onsi/ginkgo/extensions/table"
+	. "github.com/onsi/gomega"
 )
 
-func assertEqual(t *testing.T, v, e interface{}) {
-	if v != e {
-		t.Fatalf("%#v != %#v", v, e)
-	}
+func TestClient(t *testing.T) {
+	RegisterFailHandler(Fail)
+	RunSpecs(t, "GCM Client")
 }
 
-func assertDeepEqual(t *testing.T, v, e interface{}) {
-	if !reflect.DeepEqual(v, e) {
-		t.Fatalf("%#v != %#v", v, e)
-	}
-}
+var _ = Describe("GCM Client", func() {
+	Describe("initializing", func() {
+		DescribeTable("wrong initialization parameters",
+			func(config *Config, h MessageHandler, errStr string) {
+				c, err := NewClient(config, h)
+				Expect(c).To(BeNil())
+				Expect(err).To(HaveOccurred())
+				Expect(err).To(MatchError(errStr))
+			},
+			Entry("it should fail on nil config", nil, nil, "config is nil"),
+			Entry("it should fail on nil message handler", &Config{}, nil, "message handler is nil"),
+			Entry("it should fail on empty sender id", &Config{}, func(cm CCSMessage) error { return nil }, "empty sender id"),
+			Entry("it should fail on empty sender id", &Config{SenderID: "123"}, func(cm CCSMessage) error { return nil }, "empty api key"),
+		)
+	})
 
-type stubBackoff struct {
-}
+	Describe("interface implementation", func() {
+		var h *httpClientMock
+		var x *xmppClientMock
+		var c Client
+		BeforeEach(func() {
+			h = new(httpClientMock)
+			x = new(xmppClientMock)
+			c = &gcmClient{httpClient: h, xmppClient: x}
+		})
 
-func (sb stubBackoff) sendAnother() bool {
-	return true
-}
+		AfterEach(func() {
+			gt := GinkgoT()
+			h.AssertExpectations(gt)
+			x.AssertExpectations(gt)
+		})
 
-func (sb stubBackoff) setMin(min time.Duration) {
-}
+		It("should send http message", func() {
+			m := HTTPMessage{To: "me"}
+			r := &HTTPResponse{MulticastID: 100}
+			h.On("send", m).Return(r, nil)
+			resp, err := c.SendHTTP(m)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(resp).To(Equal(r))
+		})
 
-func (sb stubBackoff) wait() {
-}
+		It("should fail sending http message", func() {
+			m := HTTPMessage{}
+			h.On("send", m).Return(nil, errors.New("send error"))
+			resp, err := c.SendHTTP(m)
+			Expect(err).To(HaveOccurred())
+			Expect(resp).To(BeNil())
+			Expect(err).To(MatchError("send error"))
+		})
 
-var multicastTos = []string{"4", "8", "15", "16", "23", "42"}
-var multicastReply = []string{`{ "multicast_id": 216,
-  "success": 3,
-  "failure": 3,
-  "canonical_ids": 1,
-  "results": [
-    { "message_id": "1:0408" },
-    { "error": "Unavailable" },
-    { "error": "InternalServerError" },
-    { "message_id": "1:1517" },
-    { "message_id": "1:2342", "registration_id": "32" },
-    { "error": "NotRegistered"}
-  ]
-}`, `{ "multicast_id": 123456789012345,
-  "success": 2,
-  "failure": 0,
-  "canonical_ids": 0,
-  "results": [
-    { "message_id": "1:0409" },
-    { "message_id": "1:1516" }
-  ]
-}`}
-var expectedResp = `{"multicast_id": 123456789012345,
-  "success": 5,
-  "failure": 1,
-  "canonical_ids": 1,
-  "results": [
-    { "message_id": "1:0408" },
-    { "message_id": "1:0409" },
-    { "message_id": "1:1516" },
-    { "message_id": "1:1517" },
-    { "message_id": "1:2342", "registration_id": "32" },
-    { "error": "NotRegistered"}
-  ]
- }`
+		It("should return client id", func() {
+			x.On("ID").Return("my id")
+			Expect(c.ID()).To(Equal("my id"))
+		})
 
-type stubHttpClient struct {
-	InvocationNum int
-	Requests      []string
-}
+		It("should send xmpp message", func() {
+			m := XMPPMessage{To: "me", MessageID: "my id"}
+			x.On("send", m).Return("my id", 100, nil)
+			id, bytes, err := c.SendXMPP(m)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(id).To(Equal("my id"))
+			Expect(bytes).To(Equal(100))
+		})
 
-func (c *stubHttpClient) Send(message HTTPMessage) (*HTTPResponse, error) {
-	response := &HTTPResponse{}
-	err := json.Unmarshal([]byte(multicastReply[c.InvocationNum]), &response)
-	c.InvocationNum++
-	return response, err
-}
+		It("should fail sending xmpp message", func() {
+			m := XMPPMessage{To: "me", MessageID: "my id"}
+			x.On("send", m).Return("", 0, errors.New("send error"))
+			id, bytes, err := c.SendXMPP(m)
+			Expect(err).To(HaveOccurred())
+			Expect(id).To(BeEmpty())
+			Expect(bytes).To(Equal(0))
+			Expect(err).To(MatchError("send error"))
+		})
 
-func (c stubHttpClient) GetRetryAfter() string {
-	return ""
-}
+		It("should close successfully", func() {
+			x.On("close", true).Return(nil)
+			err := c.Close()
+			Expect(err).NotTo(HaveOccurred())
+		})
 
-var singleTargetMessage = &HTTPMessage{To: "recipient"}
-var multipleTargetMessage = &HTTPMessage{RegistrationIDs: multicastTos}
-
-// Test send for http client
-func TestHTTPClientSend(t *testing.T) {
-	expectedRetryAfter := "10"
-	var authHeader string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set(http.CanonicalHeaderKey("Content-Type"), "application/json")
-		w.Header().Set(http.CanonicalHeaderKey("Retry-After"), expectedRetryAfter)
-		w.WriteHeader(200)
-		fmt.Fprintln(w, expectedResp)
-	}))
-	defer server.Close()
-
-	transport := &http.Transport{
-		Proxy: func(req *http.Request) (*url.URL, error) {
-			authHeader = req.Header.Get(http.CanonicalHeaderKey("Authorization"))
-			return url.Parse(server.URL)
-		},
-	}
-	httpClient := &http.Client{Transport: transport}
-	c := &httpGCMClient{server.URL, "apiKey", httpClient, "0", true}
-	response, error := c.sendHTTP(*singleTargetMessage)
-	expectedAuthHeader := "key=apiKey"
-	expResp := &HTTPResponse{}
-	err := json.Unmarshal([]byte(expectedResp), &expResp)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	assertEqual(t, authHeader, expectedAuthHeader)
-	assertEqual(t, error, nil)
-	assertDeepEqual(t, response, expResp)
-	assertEqual(t, c.GetRetryAfter(), expectedRetryAfter)
-}
-
-// test sending a GCM message through the HTTP connection server (includes backoff)
-func TestSendHTTP(t *testing.T) {
-	c := &stubHttpClient{}
-	expResp := &HTTPResponse{}
-	err := json.Unmarshal([]byte(expectedResp), &expResp)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	response, err := c.Send(*multipleTargetMessage)
-	assertDeepEqual(t, err, nil)
-	fmt.Println(response)
-	//assertDeepEqual(t, response, expResp)
-}
-
-func TestBuildRespForMulticast(t *testing.T) {
-	expResp := &HTTPResponse{}
-	err := json.Unmarshal([]byte(multicastReply[0]), &expResp)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	resultsState := &multicastResultsState{
-		"4":  &Result{MessageID: "1:0408"},
-		"8":  &Result{Error: "Unavailable"},
-		"15": &Result{Error: "InternalServerError"},
-		"16": &Result{MessageID: "1:1517"},
-		"23": &Result{MessageID: "1:2342", RegistrationID: "32"},
-		"42": &Result{Error: "NotRegistered"},
-	}
-	resp := buildRespForMulticast(multicastTos, *resultsState, 216)
-	assertDeepEqual(t, resp, expResp)
-}
-
-func TestMessageTargetAsStringArray(t *testing.T) {
-	targets, err := messageTargetAsStringsArray(*singleTargetMessage)
-	assertDeepEqual(t, targets, []string{"recipient"})
-	assertEqual(t, err, nil)
-	targets, err = messageTargetAsStringsArray(*multipleTargetMessage)
-	assertDeepEqual(t, targets, multicastTos)
-	assertEqual(t, err, nil)
-	invalidMessage := &HTTPMessage{}
-	targets, err = messageTargetAsStringsArray(*invalidMessage)
-	assertDeepEqual(t, targets, []string{})
-	assertEqual(t, "cannot find any valid target field in message", err.Error())
-}
-
-func TestCheckResults(t *testing.T) {
-	response := &HTTPResponse{}
-	err := json.Unmarshal([]byte(multicastReply[0]), &response)
-	if err != nil {
-		t.Fatalf("error: %v", err)
-	}
-	resultsState := &multicastResultsState{}
-	doRetry, toRetry, err := checkResults(response.Results, multicastTos, *resultsState)
-	expectedToRetry := []string{"8", "15"}
-	assertEqual(t, doRetry, true)
-	assertDeepEqual(t, toRetry, expectedToRetry)
-	expectedResultState := &multicastResultsState{
-		"4":  &Result{MessageID: "1:0408"},
-		"8":  &Result{Error: "Unavailable"},
-		"15": &Result{Error: "InternalServerError"},
-		"16": &Result{MessageID: "1:1517"},
-		"23": &Result{MessageID: "1:2342", RegistrationID: "32"},
-		"42": &Result{Error: "NotRegistered"},
-	}
-	assertDeepEqual(t, resultsState, expectedResultState)
-}
-
-func TestXmppUser(t *testing.T) {
-	assertEqual(t, xmppUser("gcm.googleapis.com", "b"), "b@gcm.googleapis.com")
-}
+		It("should return close error from xmpp", func() {
+			x.On("close", true).Return(errors.New("close error"))
+			err := c.Close()
+			Expect(err).To(MatchError("close error"))
+		})
+	})
+})

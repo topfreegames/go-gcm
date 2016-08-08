@@ -16,49 +16,7 @@ const (
 	httpAddress = "https://gcm-http.googleapis.com/gcm/send"
 )
 
-// HTTPMessage defines a downstream GCM HTTP message.
-type HTTPMessage struct {
-	To                    string        `json:"to,omitempty"`
-	RegistrationIDs       []string      `json:"registration_ids,omitempty"`
-	CollapseKey           string        `json:"collapse_key,omitempty"`
-	Priority              string        `json:"priority,omitempty"`
-	ContentAvailable      bool          `json:"content_available,omitempty"`
-	DelayWhileIdle        bool          `json:"delay_while_idle,omitempty"`
-	TimeToLive            *uint         `json:"time_to_live,omitempty"`
-	RestrictedPackageName string        `json:"restricted_package_name,omitempty"`
-	DryRun                bool          `json:"dry_run,omitempty"`
-	Data                  Data          `json:"data,omitempty"`
-	Notification          *Notification `json:"notification,omitempty"`
-}
-
-// HTTPResponse is the GCM connection server response to an HTTP downstream message.
-type HTTPResponse struct {
-	MulticastID  int64    `json:"multicast_id,omitempty"`
-	Success      uint     `json:"success,omitempty"`
-	Failure      uint     `json:"failure,omitempty"`
-	CanonicalIds uint     `json:"canonical_ids,omitempty"`
-	Results      []Result `json:"results,omitempty"`
-	MessageID    uint     `json:"message_id,omitempty"`
-	Error        string   `json:"error,omitempty"`
-}
-
-// Result represents the status of a processed HTTP message.
-type Result struct {
-	MessageID      string `json:"message_id,omitempty"`
-	RegistrationID string `json:"registration_id,omitempty"`
-	Error          string `json:"error,omitempty"`
-}
-
-// Used to compute results for multicast messages with retries.
-type multicastResultsState map[string]*Result
-
-// httpClient is an interface to stub the http client in tests.
-type httpClient interface {
-	Send(m HTTPMessage) (*HTTPResponse, error)
-	GetRetryAfter() string
-}
-
-// httpGCMClient is a client for the Gcm Http Connection Server.
+// httpGCMClient is a client for the GCM HTTP Server.
 type httpGCMClient struct {
 	GCMURL     string
 	apiKey     string
@@ -67,15 +25,18 @@ type httpGCMClient struct {
 	debug      bool
 }
 
-// backoffProvider defines an interface for backoff.
-type backoffProvider interface {
-	sendAnother() bool
-	setMin(min time.Duration)
-	wait()
+// httpResult represents the status of a processed HTTP message.
+type httpResult struct {
+	MessageID      string `json:"message_id,omitempty"`
+	RegistrationID string `json:"registration_id,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
+// Used to compute results for multicast messages with retries.
+type multicastResultsState map[string]*httpResult
+
 // newHTTPGCMClient creates a new client for handling GCM HTTP requests.
-func newHTTPGCMClient(apiKey string, debug bool) *httpGCMClient {
+func newHTTPClient(apiKey string, debug bool) httpClient {
 	return &httpGCMClient{
 		GCMURL:     httpAddress,
 		apiKey:     apiKey,
@@ -86,12 +47,12 @@ func newHTTPGCMClient(apiKey string, debug bool) *httpGCMClient {
 }
 
 // GetRetryAfter gets the value of the retry after header if present.
-func (c httpGCMClient) GetRetryAfter() string {
+func (c httpGCMClient) getRetryAfter() string {
 	return c.retryAfter
 }
 
 // Send sends an HTTP message using exponential backoff, handling multicast replies.
-func (c *httpGCMClient) Send(m HTTPMessage) (*HTTPResponse, error) {
+func (c *httpGCMClient) send(m HTTPMessage) (*HTTPResponse, error) {
 	b := newExponentialBackoff()
 	// TODO(silvano): check this with responses for topic/notification group.
 	gcmResp := &HTTPResponse{}
@@ -117,7 +78,7 @@ func (c *httpGCMClient) Send(m HTTPMessage) (*HTTPResponse, error) {
 				return gcmResp, fmt.Errorf("error checking GCM results: %v", err)
 			}
 			if doRetry {
-				retryAfter, err := time.ParseDuration(c.GetRetryAfter())
+				retryAfter, err := time.ParseDuration(c.getRetryAfter())
 				if err != nil {
 					b.setMin(retryAfter)
 				}
@@ -144,7 +105,7 @@ func (c *httpGCMClient) Send(m HTTPMessage) (*HTTPResponse, error) {
 	return gcmResp, nil
 }
 
-// sendHTTP sends a request to GCM HTTP server and parses the response.
+// sendHTTP sends a single request to GCM HTTP server and parses the response.
 func (c *httpGCMClient) sendHTTP(m HTTPMessage) (*HTTPResponse, error) {
 	bs, err := json.Marshal(m)
 	if err != nil {
@@ -193,7 +154,7 @@ func (c *httpGCMClient) sendHTTP(m HTTPMessage) (*HTTPResponse, error) {
 func buildRespForMulticast(to []string, mrs multicastResultsState, mid int64) *HTTPResponse {
 	resp := &HTTPResponse{}
 	resp.MulticastID = mid
-	resp.Results = make([]Result, len(to))
+	resp.Results = make([]httpResult, len(to))
 	for i, regID := range to {
 		result, ok := mrs[regID]
 		if !ok {
@@ -225,7 +186,7 @@ func messageTargetAsStringsArray(m HTTPMessage) ([]string, error) {
 }
 
 // checkResults determines which errors can be retried in the multicast send.
-func checkResults(gcmResults []Result, recipients []string,
+func checkResults(gcmResults []httpResult, recipients []string,
 	resultsState multicastResultsState) (doRetry bool, toRetry []string, err error) {
 	doRetry = false
 	toRetry = []string{}
