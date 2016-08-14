@@ -131,7 +131,6 @@ var _ = Describe("HTTP Client", func() {
 			json.Unmarshal([]byte(expectedResp), &expResp)
 			Expect(authHeader).To(Equal("key=apiKey"))
 			Expect(resp).To(Equal(&expResp))
-			Expect(c.getRetryAfter()).To(Equal("10"))
 		})
 	})
 })

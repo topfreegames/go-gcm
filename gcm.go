@@ -49,6 +49,7 @@ type HTTPMessage struct {
 
 // HTTPResponse is the GCM connection server response to an HTTP downstream message.
 type HTTPResponse struct {
+	StatusCode   int          `json:"-"`
 	MulticastID  int64        `json:"multicast_id,omitempty"`
 	Success      uint         `json:"success,omitempty"`
 	Failure      uint         `json:"failure,omitempty"`
@@ -131,7 +132,6 @@ type Client interface {
 // httpClient is an interface to stub the internal http client in tests.
 type httpClient interface {
 	send(m HTTPMessage) (*HTTPResponse, error)
-	getRetryAfter() string
 }
 
 // xmppClient is an interface to stub the internal xmpp client in tests.

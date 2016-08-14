@@ -21,7 +21,6 @@ type httpGCMClient struct {
 	GCMURL     string
 	apiKey     string
 	httpClient *http.Client
-	retryAfter string
 	debug      bool
 }
 
@@ -41,46 +40,51 @@ func newHTTPClient(apiKey string, debug bool) httpClient {
 		GCMURL:     httpAddress,
 		apiKey:     apiKey,
 		httpClient: &http.Client{},
-		retryAfter: "0",
 		debug:      debug,
 	}
 }
 
-// GetRetryAfter gets the value of the retry after header if present.
-func (c httpGCMClient) getRetryAfter() string {
-	return c.retryAfter
-}
-
 // Send sends an HTTP message using exponential backoff, handling multicast replies.
 func (c *httpGCMClient) send(m HTTPMessage) (*HTTPResponse, error) {
-	b := newExponentialBackoff()
-	// TODO(silvano): check this with responses for topic/notification group.
-	gcmResp := &HTTPResponse{}
-	var multicastID int64
 	targets, err := messageTargetAsStringsArray(m)
 	if err != nil {
-		return gcmResp, fmt.Errorf("error extracting target from message: %v", err)
+		return nil, fmt.Errorf("error extracting target from message: %v", err)
 	}
 
+	var (
+		multicastID  int64
+		retryAfter   string
+		gcmResp      *HTTPResponse
+		b            backoffProvider       = newExponentialBackoff()
+		resultsState multicastResultsState = make(multicastResultsState)
+		localTo      []string              = make([]string, len(targets))
+	)
+
 	// Make a copy of the targets to keep track of results during retries.
-	localTo := make([]string, len(targets))
 	copy(localTo, targets)
-	resultsState := &multicastResultsState{}
+
 	for b.sendAnother() {
-		gcmResp, err = c.sendHTTP(m)
-		if err != nil {
-			return gcmResp, fmt.Errorf("error sending request to GCM HTTP server: %v", err)
+		if gcmResp, retryAfter, err = sendHTTP(c.httpClient, c.GCMURL, c.apiKey, m, c.debug); err != nil {
+			// Honor the Retry-After header if it is included in the response.
+			if retryAfter != "" {
+				if minBackoff, err := time.ParseDuration(retryAfter); err != nil {
+					b.setMin(minBackoff)
+				}
+				b.wait()
+				continue
+			}
+			return nil, err
 		}
 		if len(gcmResp.Results) > 0 {
-			doRetry, toRetry, err := checkResults(gcmResp.Results, localTo, *resultsState)
 			multicastID = gcmResp.MulticastID
+			doRetry, toRetry, err := checkResults(gcmResp.Results, localTo, resultsState)
 			if err != nil {
 				return gcmResp, fmt.Errorf("error checking GCM results: %v", err)
 			}
 			if doRetry {
-				retryAfter, err := time.ParseDuration(c.getRetryAfter())
-				if err != nil {
-					b.setMin(retryAfter)
+				// Honor the Retry-After header if it is included in the response.
+				if minBackoff, err := time.ParseDuration(retryAfter); err != nil {
+					b.setMin(minBackoff)
 				}
 				localTo = make([]string, len(toRetry))
 				copy(localTo, toRetry)
@@ -89,64 +93,66 @@ func (c *httpGCMClient) send(m HTTPMessage) (*HTTPResponse, error) {
 				}
 				b.wait()
 				continue
-			} else {
-				break
 			}
-		} else {
-			break
 		}
+		break
 	}
 
 	// if it was multicast, reconstruct response in case there have been retries
 	if len(targets) > 1 {
-		gcmResp = buildRespForMulticast(targets, *resultsState, multicastID)
+		gcmResp = buildRespForMulticast(targets, resultsState, multicastID)
 	}
 
 	return gcmResp, nil
 }
 
 // sendHTTP sends a single request to GCM HTTP server and parses the response.
-func (c *httpGCMClient) sendHTTP(m HTTPMessage) (*HTTPResponse, error) {
-	bs, err := json.Marshal(m)
-	if err != nil {
-		return nil, fmt.Errorf("error marshalling message: %v", err)
+func sendHTTP(httpClient *http.Client, URL string, apiKey string, m HTTPMessage,
+	debug bool) (gcmResp *HTTPResponse, retryAfter string, err error) {
+	var bs []byte
+	if bs, err = json.Marshal(m); err != nil {
+		return
 	}
-	if c.debug {
+
+	if debug {
 		log.WithField("http request", string(bs)).Debug("gcm http request")
 	}
 
-	req, err := http.NewRequest("POST", c.GCMURL, bytes.NewReader(bs))
-	if err != nil {
-		return nil, fmt.Errorf("error creating request: %v", err)
+	var req *http.Request
+	if req, err = http.NewRequest("POST", URL, bytes.NewReader(bs)); err != nil {
+		return
 	}
 
 	// Add required headers.
 	req.Header.Add(http.CanonicalHeaderKey("Content-Type"), "application/json")
-	req.Header.Add(http.CanonicalHeaderKey("Authorization"), fmt.Sprintf("key=%v", c.apiKey))
+	req.Header.Add(http.CanonicalHeaderKey("Authorization"), fmt.Sprintf("key=%v", apiKey))
 
-	httpResp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("error sending request to HTTP connection server>%v", err)
+	var httpResp *http.Response
+	if httpResp, err = httpClient.Do(req); err != nil {
+		return
 	}
 
-	gcmResp := &HTTPResponse{}
-	body, err := ioutil.ReadAll(httpResp.Body)
-	defer httpResp.Body.Close()
-	if err != nil {
-		return gcmResp, fmt.Errorf("error reading http response body: %v", err)
-	}
-
-	if c.debug {
-		log.WithField("http reply", string(body)).Debug("gcm http reply")
-	}
-	err = json.Unmarshal(body, &gcmResp)
-	if err != nil {
-		return gcmResp, fmt.Errorf("error unmarshaling json from body: %v %s", err, string(body))
-	}
-
+	gcmResp = &HTTPResponse{StatusCode: httpResp.StatusCode}
 	// TODO(silvano): this is assuming that the header contains seconds instead of a date, need to check
-	c.retryAfter = httpResp.Header.Get(http.CanonicalHeaderKey("Retry-After"))
-	return gcmResp, nil
+	retryAfter = httpResp.Header.Get(http.CanonicalHeaderKey("Retry-After"))
+
+	// Read response. Valid response body is guaranteed to exist only with response status 200.
+	var body []byte
+	if body, err = ioutil.ReadAll(httpResp.Body); err != nil && httpResp.StatusCode == http.StatusOK {
+		err = fmt.Errorf("error reading http response body: %v", err)
+		return
+	}
+	defer httpResp.Body.Close()
+
+	// Parse response if appicable.
+	if len(body) > 0 {
+		if debug {
+			log.WithField("http reply", string(body)).Debug("gcm http reply")
+		}
+		err = json.Unmarshal(body, gcmResp)
+	}
+
+	return
 }
 
 // buildRespForMulticast builds the final response for a multicast message, in case there have been
