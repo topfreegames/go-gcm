@@ -45,12 +45,12 @@ var _ = Describe("GCM Client", func() {
 	})
 
 	Describe("interface implementation", func() {
-		var h *httpClientMock
-		var x *xmppClientMock
+		var h *httpCMock
+		var x *xmppCMock
 		var c Client
 		BeforeEach(func() {
-			h = new(httpClientMock)
-			x = new(xmppClientMock)
+			h = new(httpCMock)
+			x = new(xmppCMock)
 			c = &gcmClient{httpClient: h, xmppClient: x}
 		})
 
@@ -63,7 +63,7 @@ var _ = Describe("GCM Client", func() {
 		It("should send http message", func() {
 			m := HTTPMessage{To: "me"}
 			r := &HTTPResponse{MulticastID: 100}
-			h.On("send", m).Return(r, nil)
+			h.On("Send", m).Return(r, nil)
 			resp, err := c.SendHTTP(m)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(resp).To(Equal(r))
@@ -71,7 +71,7 @@ var _ = Describe("GCM Client", func() {
 
 		It("should fail sending http message", func() {
 			m := HTTPMessage{}
-			h.On("send", m).Return(nil, errors.New("send error"))
+			h.On("Send", m).Return(nil, errors.New("send error"))
 			resp, err := c.SendHTTP(m)
 			Expect(err).To(HaveOccurred())
 			Expect(resp).To(BeNil())
@@ -85,16 +85,16 @@ var _ = Describe("GCM Client", func() {
 
 		It("should send xmpp message", func() {
 			m := XMPPMessage{To: "me", MessageID: "my id"}
-			x.On("send", m).Return("my id", 100, nil)
+			x.On("Send", m).Return("my id", 100, nil)
 			id, bytes, err := c.SendXMPP(m)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(id).To(Equal("my id"))
 			Expect(bytes).To(Equal(100))
 		})
 
-		It("should fail sending xmpp message", func() {
+		It("should fail on send error", func() {
 			m := XMPPMessage{To: "me", MessageID: "my id"}
-			x.On("send", m).Return("", 0, errors.New("send error"))
+			x.On("Send", m).Return("", 0, errors.New("send error"))
 			id, bytes, err := c.SendXMPP(m)
 			Expect(err).To(HaveOccurred())
 			Expect(id).To(BeEmpty())
@@ -103,13 +103,13 @@ var _ = Describe("GCM Client", func() {
 		})
 
 		It("should close successfully", func() {
-			x.On("close", true).Return(nil)
+			x.On("Close", true).Return(nil)
 			err := c.Close()
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should return close error from xmpp", func() {
-			x.On("close", true).Return(errors.New("close error"))
+			x.On("Close", true).Return(errors.New("close error"))
 			err := c.Close()
 			Expect(err).To(MatchError("close error"))
 		})

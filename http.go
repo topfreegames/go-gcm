@@ -16,11 +16,16 @@ const (
 	httpAddress = "https://gcm-http.googleapis.com/gcm/send"
 )
 
-// httpGCMClient is a client for the GCM HTTP Server.
-type httpGCMClient struct {
+// httpClient is an interface to stub the internal http.Client.
+type httpClient interface {
+	Do(req *http.Request) (resp *http.Response, err error)
+}
+
+// gcmHTTP is a container for the GCM HTTP Server client.
+type gcmHTTP struct {
 	GCMURL     string
 	apiKey     string
-	httpClient *http.Client
+	httpClient httpClient
 	debug      bool
 }
 
@@ -35,8 +40,8 @@ type httpResult struct {
 type multicastResultsState map[string]*httpResult
 
 // newHTTPGCMClient creates a new client for handling GCM HTTP requests.
-func newHTTPClient(apiKey string, debug bool) httpClient {
-	return &httpGCMClient{
+func newHTTPClient(apiKey string, debug bool) httpC {
+	return &gcmHTTP{
 		GCMURL:     httpAddress,
 		apiKey:     apiKey,
 		httpClient: &http.Client{},
@@ -45,7 +50,7 @@ func newHTTPClient(apiKey string, debug bool) httpClient {
 }
 
 // Send sends an HTTP message using exponential backoff, handling multicast replies.
-func (c *httpGCMClient) send(m HTTPMessage) (*HTTPResponse, error) {
+func (c *gcmHTTP) Send(m HTTPMessage) (*HTTPResponse, error) {
 	targets, err := messageTargetAsStringsArray(m)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting target from message: %v", err)
@@ -107,7 +112,7 @@ func (c *httpGCMClient) send(m HTTPMessage) (*HTTPResponse, error) {
 }
 
 // sendHTTP sends a single request to GCM HTTP server and parses the response.
-func sendHTTP(httpClient *http.Client, URL string, apiKey string, m HTTPMessage,
+func sendHTTP(httpClient httpClient, URL string, apiKey string, m HTTPMessage,
 	debug bool) (gcmResp *HTTPResponse, retryAfter string, err error) {
 	var bs []byte
 	if bs, err = json.Marshal(m); err != nil {

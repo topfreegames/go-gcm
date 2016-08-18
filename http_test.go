@@ -95,7 +95,7 @@ var _ = Describe("HTTP Client", func() {
 	Context("sending", func() {
 		var (
 			server     *httptest.Server
-			c          httpClient
+			c          httpC
 			authHeader string
 		)
 
@@ -112,7 +112,7 @@ var _ = Describe("HTTP Client", func() {
 					return url.Parse(server.URL)
 				},
 			}
-			c = &httpGCMClient{
+			c = &gcmHTTP{
 				GCMURL:     server.URL,
 				apiKey:     "apiKey",
 				httpClient: &http.Client{Transport: transport},
@@ -125,7 +125,7 @@ var _ = Describe("HTTP Client", func() {
 
 		It("should send successfully", func() {
 			m := HTTPMessage{RegistrationIDs: ids}
-			resp, err := c.send(m)
+			resp, err := c.Send(m)
 			Expect(err).NotTo(HaveOccurred())
 			expResp := HTTPResponse{}
 			json.Unmarshal([]byte(expectedResp), &expResp)

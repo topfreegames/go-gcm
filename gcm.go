@@ -17,19 +17,6 @@ package gcm
 
 import (
 	"time"
-
-	"github.com/jpillora/backoff"
-)
-
-var (
-	// DefaultMinBackoff is a default min delay for backoff.
-	DefaultMinBackoff = 1 * time.Second
-	// DefaultMaxBackoff is the default max delay for backoff.
-	DefaultMaxBackoff = 10 * time.Second
-	// DefaultPingInterval is a default interval between pings.
-	DefaultPingInterval = 20 * time.Second
-	// DefaultPingTimeout is a default time to wait for ping replies.
-	DefaultPingTimeout = 30 * time.Second
 )
 
 // HTTPMessage defines a downstream GCM HTTP message.
@@ -96,11 +83,13 @@ type Notification struct {
 
 // Config is a container for gcm configuration data.
 type Config struct {
-	SenderID          string
-	APIKey            string
-	Sandbox           bool
-	MonitorConnection bool
-	Debug             bool
+	SenderID          string `json:"sender_id"`
+	APIKey            string `json:"api_key"`
+	Sandbox           bool   `json:"sandbox"`
+	MonitorConnection bool   `json:"monitor_connection"`
+	Debug             bool   `json:"debug"`
+	PingInterval      int    `json:"ping_interval"`
+	PingTimeout       int    `json:"ping_timeout"`
 }
 
 // CCSMessage is an XMPP message sent from CCS.
@@ -129,65 +118,17 @@ type Client interface {
 	Close() error
 }
 
-// httpClient is an interface to stub the internal http client in tests.
-type httpClient interface {
-	send(m HTTPMessage) (*HTTPResponse, error)
+// httpC is an interface to stub the internal HTTP client.
+type httpC interface {
+	Send(m HTTPMessage) (*HTTPResponse, error)
 }
 
-// xmppClient is an interface to stub the internal xmpp client in tests.
-type xmppClient interface {
-	listen(h MessageHandler) error
-	send(m XMPPMessage) (string, int, error)
-	ping(timeout time.Duration) error
-	close(graceful bool) error
-	isClosed() bool
+// xmppC is an interface to stub the internal XMPP client.
+type xmppC interface {
+	Listen(h MessageHandler) error
+	Send(m XMPPMessage) (string, int, error)
+	Ping(timeout time.Duration) error
+	Close(graceful bool) error
+	IsClosed() bool
 	ID() string
-}
-
-// backoffProvider defines an interface for backoff.
-type backoffProvider interface {
-	sendAnother() bool
-	getMin() time.Duration
-	setMin(min time.Duration)
-	wait()
-}
-
-// Implementation of backoff provider using exponential backoff.
-type exponentialBackoff struct {
-	b            backoff.Backoff
-	currentDelay time.Duration
-}
-
-// Factory method for exponential backoff, uses default values for Min and Max and
-// adds Jitter.
-func newExponentialBackoff() backoffProvider {
-	b := &backoff.Backoff{
-		Min:    DefaultMinBackoff,
-		Max:    DefaultMaxBackoff,
-		Jitter: true,
-	}
-	return &exponentialBackoff{b: *b, currentDelay: b.Duration()}
-}
-
-// Returns true if not over the retries limit
-func (eb exponentialBackoff) sendAnother() bool {
-	return eb.currentDelay <= eb.b.Max
-}
-
-func (eb *exponentialBackoff) getMin() time.Duration {
-	return eb.b.Min
-}
-
-// Set the minumim delay for backoff
-func (eb *exponentialBackoff) setMin(min time.Duration) {
-	eb.b.Min = min
-	if (eb.currentDelay) < min {
-		eb.currentDelay = min
-	}
-}
-
-// Wait for the current value of backoff
-func (eb exponentialBackoff) wait() {
-	time.Sleep(eb.currentDelay)
-	eb.currentDelay = eb.b.Duration()
 }

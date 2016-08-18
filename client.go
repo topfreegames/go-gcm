@@ -11,14 +11,16 @@ import (
 // gcmClient is a container for http and xmpp GCM clients.
 type gcmClient struct {
 	sync.Mutex
-	senderID   string
-	apiKey     string
-	mh         MessageHandler
-	xmppClient xmppClient
-	httpClient httpClient
-	cerr       chan error
-	sandbox    bool
-	debug      bool
+	senderID     string
+	apiKey       string
+	mh           MessageHandler
+	xmppClient   xmppC
+	httpClient   httpC
+	cerr         chan error
+	sandbox      bool
+	pingInterval time.Duration
+	pingTimeout  time.Duration
+	debug        bool
 }
 
 // NewClient creates a new GCM client for this senderID.
@@ -35,11 +37,19 @@ func NewClient(config *Config, h MessageHandler) (Client, error) {
 	}
 
 	c := &gcmClient{
-		senderID: config.SenderID,
-		apiKey:   config.APIKey,
-		mh:       h,
-		debug:    config.Debug,
-		sandbox:  config.Sandbox,
+		senderID:     config.SenderID,
+		apiKey:       config.APIKey,
+		mh:           h,
+		debug:        config.Debug,
+		sandbox:      config.Sandbox,
+		pingInterval: time.Duration(config.PingInterval) * time.Second,
+		pingTimeout:  time.Duration(config.PingTimeout) * time.Second,
+	}
+	if c.pingInterval <= 0 {
+		c.pingInterval = DefaultPingInterval
+	}
+	if c.pingTimeout <= 0 {
+		c.pingTimeout = DefaultPingTimeout
 	}
 
 	if config.Debug {
@@ -71,12 +81,12 @@ func (c *gcmClient) ID() string {
 
 // Send a message using the HTTP GCM connection server.
 func (c *gcmClient) SendHTTP(m HTTPMessage) (*HTTPResponse, error) {
-	return c.httpClient.send(m)
+	return c.httpClient.Send(m)
 }
 
 // SendXmpp sends a message using the XMPP GCM connection server.
 func (c *gcmClient) SendXMPP(m XMPPMessage) (string, int, error) {
-	return c.xmppClient.send(m)
+	return c.xmppClient.Send(m)
 }
 
 // Close will stop and close the corresponding client.
@@ -84,7 +94,7 @@ func (c *gcmClient) Close() error {
 	c.Lock()
 	defer c.Unlock()
 	if c.xmppClient != nil {
-		return c.xmppClient.close(true)
+		return c.xmppClient.Close(true)
 	}
 	return nil
 }
@@ -111,7 +121,7 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 			}
 			log.WithFields(log.Fields{"sender id": c.senderID, "error": err}).Error("connect gcm xmpp")
 			// Wait and try again.
-			time.Sleep(DefaultPingTimeout)
+			time.Sleep(c.pingTimeout)
 			continue
 		}
 
@@ -132,7 +142,7 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 		// If active monitoring is enabled, start pinging routine.
 		if activeMonitor {
 			go func() {
-				cerr <- pingPeriodically(newc, DefaultPingTimeout, DefaultPingInterval)
+				cerr <- pingPeriodically(newc, c.pingTimeout, c.pingInterval)
 			}()
 		}
 
@@ -145,7 +155,7 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 		log.WithFields(log.Fields{"client id": newc.ID(), "error": err}).Error("gcm xmpp connection")
 
 		// Close the old client.
-		go newc.close(true)
+		go newc.Close(true)
 
 		firstRun = false
 	}
@@ -153,7 +163,7 @@ func (c *gcmClient) createAndMonitorXMPP(activeMonitor bool, xcerr chan error) {
 }
 
 // Creates a new xmpp client, connects to the server and starts listening.
-func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (xmppClient, error) {
+func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandler, cerr chan error, debug bool) (xmppC, error) {
 	newc, err := newXMPPClient(isSandbox, senderID, apiKey, debug)
 	if err != nil {
 		return nil, err
@@ -162,7 +172,7 @@ func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandle
 
 	// Start listening on this connection.
 	go func() {
-		if err := newc.listen(h); err != nil {
+		if err := newc.Listen(h); err != nil {
 			l.WithField("error", err).Error("gcm xmpp listen")
 			cerr <- err
 		}
@@ -173,17 +183,17 @@ func connectXMPP(isSandbox bool, senderID string, apiKey string, h MessageHandle
 }
 
 // pingPeriodically sends periodic pings. If pong is received, the timer is reset.
-func pingPeriodically(xm xmppClient, timeout, interval time.Duration) error {
+func pingPeriodically(xm xmppC, timeout, interval time.Duration) error {
 	t := time.NewTimer(interval)
 	defer t.Stop()
 
 	for {
 		select {
 		case <-t.C:
-			if xm.isClosed() {
+			if xm.IsClosed() {
 				return nil
 			}
-			if err := xm.ping(timeout); err != nil {
+			if err := xm.Ping(timeout); err != nil {
 				return err
 			}
 			t.Reset(interval)

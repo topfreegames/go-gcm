@@ -20,6 +20,7 @@ This is a rework of [go-gcm library](https://github.com/google/go-gcm). It has t
 * handles CONNECTION_DRAINING properly
 * graceful close
 * improved logging with logrus
+* tests
 * various govet/golint fixes
 * [Travis][travis] and [Codecov][codecov] badges added
 
