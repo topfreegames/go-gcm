@@ -41,9 +41,16 @@ type HTTPResponse struct {
 	Success      uint         `json:"success,omitempty"`
 	Failure      uint         `json:"failure,omitempty"`
 	CanonicalIds uint         `json:"canonical_ids,omitempty"`
-	Results      []httpResult `json:"results,omitempty"`
+	Results      []HTTPResult `json:"results,omitempty"`
 	MessageID    uint         `json:"message_id,omitempty"`
 	Error        string       `json:"error,omitempty"`
+}
+
+// HTTPResult represents the result of a single processed HTTP request.
+type HTTPResult struct {
+	MessageID      string `json:"message_id,omitempty"`
+	RegistrationID string `json:"registration_id,omitempty"`
+	Error          string `json:"error,omitempty"`
 }
 
 // XMPPMessage defines a downstream GCM XMPP message.

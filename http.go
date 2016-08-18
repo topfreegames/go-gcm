@@ -29,15 +29,8 @@ type gcmHTTP struct {
 	debug      bool
 }
 
-// httpResult represents the status of a processed HTTP message.
-type httpResult struct {
-	MessageID      string `json:"message_id,omitempty"`
-	RegistrationID string `json:"registration_id,omitempty"`
-	Error          string `json:"error,omitempty"`
-}
-
 // Used to compute results for multicast messages with retries.
-type multicastResultsState map[string]*httpResult
+type multicastResultsState map[string]*HTTPResult
 
 // newHTTPGCMClient creates a new client for handling GCM HTTP requests.
 func newHTTPClient(apiKey string, debug bool) httpC {
@@ -165,7 +158,7 @@ func sendHTTP(httpClient httpClient, URL string, apiKey string, m HTTPMessage,
 func buildRespForMulticast(to []string, mrs multicastResultsState, mid int64) *HTTPResponse {
 	resp := &HTTPResponse{}
 	resp.MulticastID = mid
-	resp.Results = make([]httpResult, len(to))
+	resp.Results = make([]HTTPResult, len(to))
 	for i, regID := range to {
 		result, ok := mrs[regID]
 		if !ok {
@@ -197,7 +190,7 @@ func messageTargetAsStringsArray(m HTTPMessage) ([]string, error) {
 }
 
 // checkResults determines which errors can be retried in the multicast send.
-func checkResults(gcmResults []httpResult, recipients []string,
+func checkResults(gcmResults []HTTPResult, recipients []string,
 	resultsState multicastResultsState) (doRetry bool, toRetry []string, err error) {
 	doRetry = false
 	toRetry = []string{}

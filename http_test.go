@@ -66,12 +66,12 @@ var _ = Describe("HTTP Client", func() {
 			Expect(err).NotTo(HaveOccurred())
 			Expect(toRetry).To(Equal([]string{"8", "15"}))
 			expectedResultState := &multicastResultsState{
-				"4":  &httpResult{MessageID: "1:0408"},
-				"8":  &httpResult{Error: "Unavailable"},
-				"15": &httpResult{Error: "InternalServerError"},
-				"16": &httpResult{MessageID: "1:1517"},
-				"23": &httpResult{MessageID: "1:2342", RegistrationID: "32"},
-				"42": &httpResult{Error: "NotRegistered"},
+				"4":  &HTTPResult{MessageID: "1:0408"},
+				"8":  &HTTPResult{Error: "Unavailable"},
+				"15": &HTTPResult{Error: "InternalServerError"},
+				"16": &HTTPResult{MessageID: "1:1517"},
+				"23": &HTTPResult{MessageID: "1:2342", RegistrationID: "32"},
+				"42": &HTTPResult{Error: "NotRegistered"},
 			}
 			Expect(resultsState).To(Equal(expectedResultState))
 		})
@@ -80,12 +80,12 @@ var _ = Describe("HTTP Client", func() {
 			response := &HTTPResponse{}
 			json.Unmarshal([]byte(multicastReply), &response)
 			resultsState := multicastResultsState{
-				"4":  &httpResult{MessageID: "1:0408"},
-				"8":  &httpResult{Error: "Unavailable"},
-				"15": &httpResult{Error: "InternalServerError"},
-				"16": &httpResult{MessageID: "1:1517"},
-				"23": &httpResult{MessageID: "1:2342", RegistrationID: "32"},
-				"42": &httpResult{Error: "NotRegistered"},
+				"4":  &HTTPResult{MessageID: "1:0408"},
+				"8":  &HTTPResult{Error: "Unavailable"},
+				"15": &HTTPResult{Error: "InternalServerError"},
+				"16": &HTTPResult{MessageID: "1:1517"},
+				"23": &HTTPResult{MessageID: "1:2342", RegistrationID: "32"},
+				"42": &HTTPResult{Error: "NotRegistered"},
 			}
 			resp := buildRespForMulticast(ids, resultsState, 216)
 			Expect(resp).To(Equal(response))
