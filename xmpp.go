@@ -124,14 +124,14 @@ func (c *gcmXMPP) IsClosed() bool {
 // Returns error if timeout time passes before pong.
 func (c *gcmXMPP) Ping(timeout time.Duration) error {
 	l := log.WithField("id", c.ID())
-	l.Debug("------- ping")
+	l.Debug("-- ping")
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
 		return err
 	}
 	select {
 	case <-c.pongs:
 		// Ping successful.
-		l.Debug("-- pong")
+		l.Debug("--- pong")
 		return nil
 	case <-time.After(timeout):
 		return fmt.Errorf("gcm xmpp pong timed out after %s", timeout.String())

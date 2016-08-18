@@ -60,9 +60,9 @@ func (c *gcmHTTP) Send(m HTTPMessage) (*HTTPResponse, error) {
 		multicastID  int64
 		retryAfter   string
 		gcmResp      *HTTPResponse
-		b            backoffProvider       = newExponentialBackoff()
-		resultsState multicastResultsState = make(multicastResultsState)
-		localTo      []string              = make([]string, len(targets))
+		b            = newExponentialBackoff()
+		resultsState = make(multicastResultsState)
+		localTo      = make([]string, len(targets))
 	)
 
 	// Make a copy of the targets to keep track of results during retries.

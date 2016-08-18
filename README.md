@@ -3,8 +3,8 @@ GCM Library for Go [![GoDoc][godoc image]][godoc] [![Build Status][travis image]
 
 Provides the following functionality for Google Cloud Messaging:
 
-1. Sending messages.
-2. Listening to receiving messages.
+1. Sending messages via HTTP or XMPP.
+2. Listening to receiving messages from XMPP.
 
 Documentation: http://godoc.org/github.com/rounds/go-gcm
 
@@ -15,14 +15,14 @@ Documentation: http://godoc.org/github.com/rounds/go-gcm
 ## Status
 
 This is a rework of [go-gcm library](https://github.com/google/go-gcm). It has the following improvements:
-* code refactored, http and xmpp clients separated
-* monitors xmpp connection with xmpp pings, redials when it fails
+* code refactored, HTTP and XMPP clients separated
+* monitors XMPP connection with Pings, redials when ping fails
 * handles CONNECTION_DRAINING properly
 * graceful close
-* improved logging with logrus
-* tests
+* improved logging with [logrus](https://github.com/Sirupsen/logrus)
+* [ginkgo](https://onsi.github.io/ginkgo/) tests
 * various govet/golint fixes
-* [Travis][travis] and [Codecov][codecov] badges added
+* automatic builds with [Travis][travis] and coverage with [Codecov][codecov] 
 
 This library is in Beta. We will make an effort to support the library, but we reserve the right to make incompatible changes when necessary.
 
