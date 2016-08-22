@@ -5,6 +5,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/rounds/go-gcm/mocks"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
@@ -12,12 +14,12 @@ import (
 var _ = Describe("GCM XMPP Client", func() {
 	Context("initialized", func() {
 		var (
-			xm *xmppClientMock
+			xm *mocks.XMPPClient
 			c  *gcmXMPP
 		)
 
 		BeforeEach(func() {
-			xm = new(xmppClientMock)
+			xm = new(mocks.XMPPClient)
 			c = &gcmXMPP{xmppClient: xm, pongs: make(chan struct{}, 10)}
 		})
 

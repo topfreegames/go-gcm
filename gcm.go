@@ -15,10 +15,6 @@
 // Package gcm provides send and receive GCM functionality.
 package gcm
 
-import (
-	"time"
-)
-
 // HTTPMessage defines a downstream GCM HTTP message.
 type HTTPMessage struct {
 	To                    string        `json:"to,omitempty"`
@@ -117,25 +113,10 @@ type CCSMessage struct {
 // MessageHandler is the type for a function that handles a CCS message.
 type MessageHandler func(cm CCSMessage) error
 
-// Client defines an interface for GCM client.
+// Client defines an interface for the GCM client.
 type Client interface {
 	ID() string
 	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
 	SendXMPP(m XMPPMessage) (string, int, error)
 	Close() error
-}
-
-// httpC is an interface to stub the internal HTTP client.
-type httpC interface {
-	Send(m HTTPMessage) (*HTTPResponse, error)
-}
-
-// xmppC is an interface to stub the internal XMPP client.
-type xmppC interface {
-	Listen(h MessageHandler) error
-	Send(m XMPPMessage) (string, int, error)
-	Ping(timeout time.Duration) error
-	Close(graceful bool) error
-	IsClosed() bool
-	ID() string
 }

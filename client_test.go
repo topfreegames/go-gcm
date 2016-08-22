@@ -18,6 +18,8 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/mock"
+
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"
@@ -38,10 +40,49 @@ var _ = Describe("GCM Client", func() {
 				Expect(err).To(MatchError(errStr))
 			},
 			Entry("it should fail on nil config", nil, nil, "config is nil"),
-			Entry("it should fail on nil message handler", &Config{}, nil, "message handler is nil"),
-			Entry("it should fail on empty sender id", &Config{}, func(cm CCSMessage) error { return nil }, "empty sender id"),
-			Entry("it should fail on empty sender id", &Config{SenderID: "123"}, func(cm CCSMessage) error { return nil }, "empty api key"),
+			Entry("it should fail on nil message handler",
+				&Config{}, nil, "message handler is nil"),
+			Entry("it should fail on empty sender id",
+				&Config{}, func(cm CCSMessage) error { return nil }, "empty sender id"),
+			Entry("it should fail on empty api key",
+				&Config{SenderID: "123"}, func(cm CCSMessage) error { return nil }, "empty api key"),
 		)
+
+		Context("xxx", func() {
+			var (
+				xm *xmppCMock
+				hm *httpCMock
+				c  *gcmClient
+			)
+
+			BeforeEach(func() {
+				xm = new(xmppCMock)
+				hm = new(httpCMock)
+				c = &gcmClient{
+					httpClient: hm,
+					xmppClient: xm,
+					senderID:   "sender id",
+					apiKey:     "api key",
+					mh:         nil,
+				}
+			})
+
+			AfterEach(func() {
+				gt := GinkgoT()
+				xm.AssertExpectations(gt)
+				hm.AssertExpectations(gt)
+			})
+
+			It("should fail on listen error", func() {
+				xm.On("ID").Return("id1")
+				xm.On("Listen", mock.AnythingOfType("gcm.MessageHandler")).
+					Return(errors.New("Listen"))
+				cerr := make(chan error)
+				go c.monitorXMPP(false, cerr)
+				err := <-cerr
+				Expect(err).To(MatchError("Listen"))
+			})
+		})
 	})
 
 	Describe("interface implementation", func() {
