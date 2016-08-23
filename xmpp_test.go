@@ -1,9 +1,12 @@
 package gcm
 
 import (
+	"encoding/json"
 	"errors"
 	"sync"
 	"time"
+
+	"github.com/mattn/go-xmpp"
 
 	"github.com/rounds/go-gcm/mocks"
 
@@ -128,9 +131,286 @@ var _ = Describe("GCM XMPP Client", func() {
 					Expect(err).To(MatchError("error on Recv: Recv"))
 				})
 			})
+
+			Context("recv sucessful", func() {
+				var (
+					c1, c2 int
+					ret    interface{}
+					errCm  = CCSMessage{
+						From:             "from",
+						MessageID:        "id1",
+						MessageType:      "error",
+						Error:            "ccs error",
+						ErrorDescription: "description",
+					}
+					errCmStr, ackXmStr string
+				)
+
+				f1 := func() interface{} {
+					if c1 == 0 {
+						c1++
+						return ret
+					}
+					return nil
+				}
+				f2 := func() error {
+					if c2 == 0 {
+						c2++
+						return nil
+					}
+					return errors.New("Recv")
+				}
+
+				BeforeEach(func() {
+					// Recv will be called twice, first time with our payload
+					// and the second time with error to exit listen routine.
+					c1 = 0
+					c2 = 0
+					xm.On("Recv").Return(f1, f2).Twice()
+					c.closed = true
+					data, _ := json.Marshal(&errCm)
+					errCmStr = string(data)
+					ackXmStr = "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
+				})
+
+				Context("iq stanza", func() {
+					It("should handle xmpp iq stanza when ping", func() {
+						ret = xmpp.IQ{Type: "result", ID: "c2s1"}
+						err := c.Listen(nil)
+						Expect(err).To(Succeed())
+						Expect(c.pongs).To(HaveLen(1))
+					})
+
+					It("should skip xmpp iq stanza when not ping", func() {
+						ret = xmpp.IQ{}
+						err := c.Listen(nil)
+						Expect(err).To(Succeed())
+					})
+				})
+
+				Context("presence stanza", func() {
+					It("should skip presence stanza", func() {
+						ret = xmpp.Presence{}
+						err := c.Listen(nil)
+						Expect(err).To(Succeed())
+					})
+				})
+
+				Context("chat stanza", func() {
+					It("should skip chat stanza with unknown type", func() {
+						ret = xmpp.Chat{Type: "bogus"}
+						err := c.Listen(nil)
+						Expect(err).To(Succeed())
+					})
+
+					Context("empty message type", func() {
+						It("should skip stanza if ccs message not decoded", func() {
+							ret = xmpp.Chat{Type: "", Other: []string{"bogus"}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Fail("should not be called")
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+						Context("ccs ack", func() {
+							var (
+								um = CCSMessage{
+									MessageID:   "id1",
+									MessageType: CCSAck,
+								}
+								umStr string
+							)
+
+							BeforeEach(func() {
+								d, _ := json.Marshal(&um)
+								umStr = string(d)
+								ret = xmpp.Chat{Type: "", Other: []string{string(umStr)}}
+							})
+
+							It("should ignore ack if no such message in the log", func() {
+								h := func(cm CCSMessage) error {
+									defer GinkgoRecover()
+									Fail("should not be called")
+									return nil
+								}
+								err := c.Listen(h)
+								Expect(err).To(Succeed())
+							})
+
+							It("should handle ack if message is found in the log", func() {
+								xxm := XMPPMessage{MessageID: "id1"}
+								c.messages.m = make(map[string]*messageLogEntry)
+								c.messages.m[um.MessageID] = &messageLogEntry{body: &xxm, backoff: newExponentialBackoff()}
+								h := func(cm CCSMessage) error {
+									defer GinkgoRecover()
+									Expect(cm).To(Equal(um))
+									return nil
+								}
+								err := c.Listen(h)
+								Expect(err).To(Succeed())
+								Expect(c.messages.m).To(BeEmpty())
+							})
+						})
+
+						Context("ccs nack", func() {
+							var (
+								um = CCSMessage{
+									MessageID:   "id1",
+									MessageType: CCSNack,
+								}
+								umStr string
+							)
+
+							BeforeEach(func() {
+								d, _ := json.Marshal(&um)
+								umStr = string(d)
+								ret = xmpp.Chat{Type: "", Other: []string{string(umStr)}}
+							})
+
+							It("should ignore nack if no such message in the log", func() {
+								h := func(cm CCSMessage) error {
+									defer GinkgoRecover()
+									Fail("should not be called")
+									return nil
+								}
+								err := c.Listen(h)
+								Expect(err).To(Succeed())
+							})
+
+							It("should handle nack if message is found in the log", func() {
+								xxm := XMPPMessage{MessageID: "id1"}
+								c.messages.m = make(map[string]*messageLogEntry)
+								c.messages.m[um.MessageID] = &messageLogEntry{body: &xxm, backoff: newExponentialBackoff()}
+								h := func(cm CCSMessage) error {
+									defer GinkgoRecover()
+									Expect(cm).To(Equal(um))
+									return nil
+								}
+								err := c.Listen(h)
+								Expect(err).To(Succeed())
+								Expect(c.messages.m).To(BeEmpty())
+							})
+						})
+
+						It("should process control message type", func() {
+							um := CCSMessage{
+								MessageID:   "id1",
+								MessageType: CCSControl,
+							}
+							umStr, _ := json.Marshal(&um)
+							ret = xmpp.Chat{Type: "", Other: []string{string(umStr)}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Expect(cm).To(Equal(um))
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+						It("should process unknown message type", func() {
+							um := CCSMessage{
+								MessageID:   "id1",
+								MessageType: "unknown",
+							}
+							umStr, _ := json.Marshal(&um)
+							ret = xmpp.Chat{Type: "", Other: []string{string(umStr)}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Expect(cm).To(Equal(um))
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+					})
+
+					Context("normal message type", func() {
+						It("should skip stanza if ccs message not decoded", func() {
+							ret = xmpp.Chat{Type: "normal", Other: []string{"bogus"}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Fail("should not be called")
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+						It("should process receipt", func() {
+							um := CCSMessage{
+								MessageID:   "id1",
+								MessageType: CCSReceipt,
+							}
+							umStr, _ := json.Marshal(&um)
+							ret = xmpp.Chat{Type: "normal", Other: []string{string(umStr)}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Expect(cm).To(Equal(um))
+								return nil
+							}
+							payload := "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
+							xm.On("SendOrg", payload).Return(0, nil)
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+						It("should process unknown message type", func() {
+							um := CCSMessage{
+								MessageID:   "id1",
+								MessageType: "unknown",
+							}
+							umStr, _ := json.Marshal(&um)
+							ret = xmpp.Chat{Type: "normal", Other: []string{string(umStr)}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Expect(cm).To(Equal(um))
+								return nil
+							}
+							payload := "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
+							xm.On("SendOrg", payload).Return(0, nil)
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+					})
+
+					Context("error message type", func() {
+						It("should skip stanza errors if ccs message not decoded", func() {
+							ret = xmpp.Chat{Type: "error"}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Fail("should not be called")
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+
+						It("should handle stanza errors if ccs message is decoded", func() {
+							ret = xmpp.Chat{Type: "error", Other: []string{errCmStr}}
+							h := func(cm CCSMessage) error {
+								defer GinkgoRecover()
+								Expect(cm).To(Equal(errCm))
+								return nil
+							}
+							err := c.Listen(h)
+							Expect(err).To(Succeed())
+						})
+					})
+				})
+			})
 		})
 
 		Describe("closing", func() {
+			It("should show if closed", func() {
+				c := &gcmXMPP{closed: true}
+				Expect(c.IsClosed()).To(BeTrue())
+			})
+
 			Context("not graceful close", func() {
 				BeforeEach(func() {
 					xm.On("JID").Return("jid")
@@ -162,15 +442,22 @@ var _ = Describe("GCM XMPP Client", func() {
 						m: make(map[string]*messageLogEntry),
 					}
 					xm.On("JID").Return("jid")
-					xm.On("Close").Return(nil)
+				})
+
+				It("should succeed when already closed", func() {
+					c.closed = true
+					err := c.Close(true)
+					Expect(err).To(Succeed())
 				})
 
 				It("should succeed when all done", func() {
+					xm.On("Close").Return(nil)
 					err := c.Close(true)
 					Expect(err).To(Succeed())
 				})
 
 				It("should succeed with timeout", func() {
+					xm.On("Close").Return(nil)
 					c.messages.m["id"] = &messageLogEntry{}
 					err := c.Close(true)
 					Expect(err).To(Succeed())
@@ -179,11 +466,6 @@ var _ = Describe("GCM XMPP Client", func() {
 		})
 
 		Describe("misc", func() {
-			It("should show if closed", func() {
-				c := &gcmXMPP{closed: true}
-				Expect(c.IsClosed()).To(BeTrue())
-			})
-
 			It("should return internal client jid", func() {
 				c := &gcmXMPP{xmppClient: xm}
 				xm.On("JID").Return("jid")

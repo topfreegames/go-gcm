@@ -31,6 +31,8 @@ const (
 	ccsPortDev  = "5236"
 	// For CCS the min for exponential backoff has to be 1 sec
 	ccsMinBackoff = 1 * time.Second
+	// Formatter for outgoing stanzas.
+	stanzaFmtStr = `<message id="%s"><gcm xmlns="google:mobile:data">%v</gcm></message>`
 )
 
 var (
@@ -197,13 +199,25 @@ func (c *gcmXMPP) Listen(h MessageHandler) error {
 			continue
 		}
 
+		// OK, we are dealing with chat stanza.
 		v := stanza.(xmpp.Chat)
+
+		// Decode internal data if possible.
+		var cm CCSMessage
+		var decoded bool
+		if len(v.Other) != 0 {
+			err = json.Unmarshal([]byte(v.Other[0]), &cm)
+			if err != nil {
+				log.WithField("error", err).Warn("unmarshaling ccs message")
+			} else {
+				decoded = true
+			}
+		}
+
 		switch v.Type {
 		case "":
-			cm := &CCSMessage{}
-			err = json.Unmarshal([]byte(v.Other[0]), cm)
-			if err != nil {
-				log.WithField("error", err).Error("unmarshaling ccs message")
+			// Successfully decoded CCSMessage is required.
+			if !decoded {
 				continue
 			}
 			switch cm.MessageType {
@@ -211,33 +225,32 @@ func (c *gcmXMPP) Listen(h MessageHandler) error {
 				c.messages.Lock()
 				// ack for a sent message, delete it from log.
 				if _, ok := c.messages.m[cm.MessageID]; ok {
-					go h(*cm)
+					go h(cm)
 					delete(c.messages.m, cm.MessageID)
 				}
 				c.messages.Unlock()
 			case CCSNack:
 				// nack for a sent message, retry if retryable error, bubble up otherwise.
 				if retryableErrors[cm.Error] {
-					c.retryMessage(*cm, h)
+					c.retryMessage(cm, h)
 				} else {
 					c.messages.Lock()
 					if _, ok := c.messages.m[cm.MessageID]; ok {
-						go h(*cm)
+						go h(cm)
 						delete(c.messages.m, cm.MessageID)
 					}
 					c.messages.Unlock()
 				}
 			case CCSControl:
 				log.WithField("ccs message", cm).Warn("control message")
-				go h(*cm)
+				go h(cm)
 			default:
 				log.WithField("ccs message", cm).Warn("unknown ccs message type")
+				go h(cm)
 			}
 		case "normal":
-			cm := &CCSMessage{}
-			err = json.Unmarshal([]byte(v.Other[0]), cm)
-			if err != nil {
-				log.WithField("error", err).Error("unmarshaling ccs message")
+			// Successfully decoded CCSMessage is required.
+			if !decoded {
 				continue
 			}
 			switch cm.MessageType {
@@ -248,23 +261,21 @@ func (c *gcmXMPP) Listen(h MessageHandler) error {
 				// Receipt message: send ack and pass to listener.
 				ack := XMPPMessage{To: cm.From, MessageID: cm.MessageID, MessageType: CCSAck}
 				c.Send(ack)
-				go h(*cm)
+				go h(cm)
 			default:
 				log.WithField("ccs message", cm).Warn("uknown ccs message type")
 				// Upstream message: send ack and pass to listener.
 				ack := XMPPMessage{To: cm.From, MessageID: cm.MessageID, MessageType: CCSAck}
 				c.Send(ack)
-				go h(*cm)
+				go h(cm)
 			}
 		case "error":
 			log.WithField("stanza", v).Warn("error stanza")
-			cm := &CCSMessage{}
-			err = json.Unmarshal([]byte(v.Other[0]), cm)
-			if err != nil {
-				log.WithField("error", err).Error("unmarshaling ccs message")
+			// Successfully decoded CCSMessage is required.
+			if !decoded {
 				continue
 			}
-			go h(*cm)
+			go h(cm)
 		default:
 			log.WithField("stanza", v).Warn("unknown stanza")
 		}
@@ -279,14 +290,13 @@ func (c *gcmXMPP) Send(m XMPPMessage) (string, int, error) {
 		m.MessageID = uuid.New()
 	}
 
-	stanza := `<message id="%s"><gcm xmlns="google:mobile:data">%v</gcm></message>`
 	body, err := json.Marshal(m)
 	if err != nil {
 		return m.MessageID, 0, fmt.Errorf("could not unmarshal body of xmpp message: %v", err)
 	}
 	bs := string(body)
 
-	payload := fmt.Sprintf(stanza, m.MessageID, bs)
+	payload := fmt.Sprintf(stanzaFmtStr, m.MessageID, bs)
 
 	if c.debug {
 		log.WithField("xmpp payload", payload).Debug("sending gcm xmpp")
