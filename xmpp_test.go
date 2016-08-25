@@ -3,6 +3,7 @@ package gcm
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 
@@ -13,6 +14,11 @@ import (
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
 )
+
+func getMsgStr(msg *XMPPMessage) string {
+	msgData, _ := json.Marshal(msg)
+	return fmt.Sprintf(stanzaFmtStr, msg.MessageID, string(msgData))
+}
 
 var _ = Describe("GCM XMPP Client", func() {
 	Context("initialized", func() {
@@ -31,8 +37,11 @@ var _ = Describe("GCM XMPP Client", func() {
 		})
 
 		Describe("pinging", func() {
-			It("should fail on ping error", func() {
+			BeforeEach(func() {
 				xm.On("JID").Return("jid")
+			})
+
+			It("should fail on ping error", func() {
 				xm.On("PingC2S", "", "").Return(errors.New("Ping"))
 				err := c.Ping(time.Second)
 				Expect(err).To(HaveOccurred())
@@ -40,7 +49,6 @@ var _ = Describe("GCM XMPP Client", func() {
 			})
 
 			It("should fail with ping timeout", func() {
-				xm.On("JID").Return("jid")
 				xm.On("PingC2S", "", "").Return(nil)
 				err := c.Ping(100 * time.Millisecond)
 				Expect(err).To(HaveOccurred())
@@ -48,7 +56,6 @@ var _ = Describe("GCM XMPP Client", func() {
 			})
 
 			It("should succeed with pong", func() {
-				xm.On("JID").Return("jid")
 				c.pongs <- struct{}{}
 				xm.On("PingC2S", "", "").Return(nil)
 				err := c.Ping(100 * time.Millisecond)
@@ -70,10 +77,11 @@ var _ = Describe("GCM XMPP Client", func() {
 					m: make(map[string]*messageLogEntry),
 				}
 				ack = XMPPMessage{MessageType: CCSAck, MessageID: "id1"}
-				ackPayload = `<message id="id1"><gcm xmlns="google:mobile:data">{"message_id":"id1","message_type":"ack"}</gcm></message>`
+				ackPayload = getMsgStr(&ack)
+
 				var data Data = map[string]interface{}{"key": "value"}
 				msg = XMPPMessage{MessageID: "id2", Data: data}
-				msgPayload = `<message id="id2"><gcm xmlns="google:mobile:data">{"message_id":"id2","data":{"key":"value"}}</gcm></message>`
+				msgPayload = getMsgStr(&msg)
 			})
 
 			It("should send ack successfully", func() {
@@ -143,7 +151,7 @@ var _ = Describe("GCM XMPP Client", func() {
 						Error:            "ccs error",
 						ErrorDescription: "description",
 					}
-					errCmStr, ackXmStr string
+					errCmStr, ackPayload string
 				)
 
 				f1 := func() interface{} {
@@ -170,7 +178,9 @@ var _ = Describe("GCM XMPP Client", func() {
 					c.closed = true
 					data, _ := json.Marshal(&errCm)
 					errCmStr = string(data)
-					ackXmStr = "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
+
+					ack := XMPPMessage{MessageType: CCSAck, MessageID: "id1"}
+					ackPayload = getMsgStr(&ack)
 				})
 
 				Context("iq stanza", func() {
@@ -243,7 +253,10 @@ var _ = Describe("GCM XMPP Client", func() {
 							It("should handle ack if message is found in the log", func() {
 								xxm := XMPPMessage{MessageID: "id1"}
 								c.messages.m = make(map[string]*messageLogEntry)
-								c.messages.m[um.MessageID] = &messageLogEntry{body: &xxm, backoff: newExponentialBackoff()}
+								c.messages.m[um.MessageID] = &messageLogEntry{
+									body:    &xxm,
+									backoff: newExponentialBackoff(),
+								}
 								h := func(cm CCSMessage) error {
 									defer GinkgoRecover()
 									Expect(cm).To(Equal(um))
@@ -257,16 +270,17 @@ var _ = Describe("GCM XMPP Client", func() {
 
 						Context("ccs nack", func() {
 							var (
-								um = CCSMessage{
-									MessageID:   "id1",
-									MessageType: CCSNack,
-								}
+								um    CCSMessage
 								umStr string
 							)
 
 							BeforeEach(func() {
-								d, _ := json.Marshal(&um)
-								umStr = string(d)
+								um = CCSMessage{
+									MessageID:   "id1",
+									MessageType: CCSNack,
+								}
+								umData, _ := json.Marshal(&um)
+								umStr = string(umData)
 								ret = xmpp.Chat{Type: "", Other: []string{string(umStr)}}
 							})
 
@@ -283,7 +297,10 @@ var _ = Describe("GCM XMPP Client", func() {
 							It("should handle nack if message is found in the log", func() {
 								xxm := XMPPMessage{MessageID: "id1"}
 								c.messages.m = make(map[string]*messageLogEntry)
-								c.messages.m[um.MessageID] = &messageLogEntry{body: &xxm, backoff: newExponentialBackoff()}
+								c.messages.m[um.MessageID] = &messageLogEntry{
+									body:    &xxm,
+									backoff: newExponentialBackoff(),
+								}
 								h := func(cm CCSMessage) error {
 									defer GinkgoRecover()
 									Expect(cm).To(Equal(um))
@@ -352,8 +369,10 @@ var _ = Describe("GCM XMPP Client", func() {
 								Expect(cm).To(Equal(um))
 								return nil
 							}
-							payload := "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
-							xm.On("SendOrg", payload).Return(0, nil)
+
+							ack := XMPPMessage{MessageType: CCSAck, MessageID: "id1"}
+							ackPayload = getMsgStr(&ack)
+							xm.On("SendOrg", ackPayload).Return(0, nil)
 							err := c.Listen(h)
 							Expect(err).To(Succeed())
 						})
@@ -370,8 +389,9 @@ var _ = Describe("GCM XMPP Client", func() {
 								Expect(cm).To(Equal(um))
 								return nil
 							}
-							payload := "<message id=\"id1\"><gcm xmlns=\"google:mobile:data\">{\"message_id\":\"id1\",\"message_type\":\"ack\"}</gcm></message>"
-							xm.On("SendOrg", payload).Return(0, nil)
+							ack := XMPPMessage{MessageType: CCSAck, MessageID: "id1"}
+							ackPayload = getMsgStr(&ack)
+							xm.On("SendOrg", ackPayload).Return(0, nil)
 							err := c.Listen(h)
 							Expect(err).To(Succeed())
 						})
