@@ -84,7 +84,7 @@ type Notification struct {
 	TitleLocKey  string `json:"title_loc_key,omitempty"`
 }
 
-// Config is a container for gcm configuration data.
+// Config is a container for GCM client configuration data.
 type Config struct {
 	SenderID          string `json:"sender_id"`
 	APIKey            string `json:"api_key"`

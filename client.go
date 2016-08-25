@@ -94,10 +94,6 @@ func (c *gcmClient) Close() error {
 
 // newGCMClient creates an instance of gcmClient.
 func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*gcmClient, error) {
-	if config.Debug {
-		log.SetLevel(log.DebugLevel)
-	}
-
 	c := &gcmClient{
 		httpClient:   httpc,
 		xmppClient:   xmppc,
@@ -125,7 +121,7 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 	select {
 	case err := <-cerr:
 		return nil, err
-	case <-time.After(time.Second):
+	case <-time.After(time.Second): // TODO: configurable
 		// Looks good.
 	}
 
