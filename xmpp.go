@@ -19,11 +19,15 @@ const (
 	// DefaultPingTimeout is a default time to wait for ping replies.
 	DefaultPingTimeout = 30 * time.Second
 
-	// XMPP message types.
+	// CCS XMPP message types.
 	CCSAck     = "ack"
 	CCSNack    = "nack"
 	CCSControl = "control"
 	CCSReceipt = "receipt"
+	// CCS XMPP control message types.
+	CCSDraining = "CONNECTION_DRAINING"
+	// XMPP message types.
+	XMPPIQResult = "result"
 	// GCM service constants.
 	ccsHostProd = "gcm.googleapis.com"
 	ccsPortProd = "5235"
@@ -127,9 +131,13 @@ func (c *gcmXMPP) IsClosed() bool {
 func (c *gcmXMPP) Ping(timeout time.Duration) error {
 	l := log.WithField("id", c.ID())
 	l.Debug("-- ping")
+	c.Lock()
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
+		c.Unlock()
 		return err
 	}
+	c.Unlock()
+
 	select {
 	case <-c.pongs:
 		// Ping successful.
@@ -148,9 +156,6 @@ func (c *gcmXMPP) Close(graceful bool) error {
 	c.destructor.Do(func() {
 		l.Debug("xmppGcmClient close started")
 		defer l.Debug("xmppGcmClient close finished")
-		if c.IsClosed() {
-			return
-		}
 		c.Lock()
 		c.closed = true
 		c.Unlock()
@@ -191,7 +196,7 @@ func (c *gcmXMPP) Listen(h MessageHandler) error {
 		case xmpp.Chat:
 		case xmpp.IQ:
 			// See if it's a pong and do not add more than one.
-			if v.Type == "result" && v.ID == "c2s1" && len(c.pongs) == 0 {
+			if v.Type == XMPPIQResult && v.ID == "c2s1" && len(c.pongs) == 0 {
 				c.pongs <- struct{}{}
 			}
 			continue

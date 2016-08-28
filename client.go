@@ -72,12 +72,12 @@ func (c *gcmClient) ID() string {
 	return c.xmppClient.ID()
 }
 
-// Send a message using the HTTP GCM connection server (blocking).
+// SendHTTP sends a message using the HTTP GCM connection server (blocking).
 func (c *gcmClient) SendHTTP(m HTTPMessage) (*HTTPResponse, error) {
 	return c.httpClient.Send(m)
 }
 
-// SendXmpp sends a message using the XMPP GCM connection server (blocking).
+// SendXMPP sends a message using the XMPP GCM connection server (blocking).
 func (c *gcmClient) SendXMPP(m XMPPMessage) (string, int, error) {
 	return c.xmppClient.Send(m)
 }
@@ -181,8 +181,7 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 		}
 
 		// Wait for an error to occur (from listen or ping).
-		err = <-cerr
-		if err == nil {
+		if err = <-cerr; err == nil {
 			// Active close.
 			break
 		}
@@ -253,7 +252,7 @@ func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
 	switch cm.MessageType {
 	case CCSControl:
 		// Handle connection drainging request.
-		if cm.ControlType == "CONNECTION_DRAINING" {
+		if cm.ControlType == CCSDraining {
 			// Server should close the current connection.
 			c.cerr <- errors.New("connection draining")
 		}

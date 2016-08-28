@@ -465,8 +465,11 @@ var _ = Describe("GCM XMPP Client", func() {
 				})
 
 				It("should succeed when already closed", func() {
-					c.closed = true
+					xm.On("Close").Return(nil)
 					err := c.Close(true)
+					Expect(err).To(Succeed())
+					// Close again.
+					err = c.Close(true)
 					Expect(err).To(Succeed())
 				})
 
