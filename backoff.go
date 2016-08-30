@@ -38,8 +38,8 @@ func newExponentialBackoff() backoffProvider {
 	return &exponentialBackoff{b: *b, currentDelay: b.Duration()}
 }
 
-// Returns true if not over the retries limit
-func (eb exponentialBackoff) sendAnother() bool {
+// Returns true if not over the retries limit.
+func (eb *exponentialBackoff) sendAnother() bool {
 	return eb.currentDelay <= eb.b.Max
 }
 
@@ -47,7 +47,7 @@ func (eb *exponentialBackoff) getMin() time.Duration {
 	return eb.b.Min
 }
 
-// Set the minumim delay for backoff
+// Set the minumim delay for backoff.
 func (eb *exponentialBackoff) setMin(min time.Duration) {
 	eb.b.Min = min
 	if (eb.currentDelay) < min {
@@ -55,8 +55,8 @@ func (eb *exponentialBackoff) setMin(min time.Duration) {
 	}
 }
 
-// Wait for the current value of backoff
-func (eb exponentialBackoff) wait() {
+// Wait for the current value of backoff.
+func (eb *exponentialBackoff) wait() {
 	time.Sleep(eb.currentDelay)
 	eb.currentDelay = eb.b.Duration()
 }

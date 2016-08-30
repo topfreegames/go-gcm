@@ -47,6 +47,9 @@ var _ = Describe("GCM Client", func() {
 				&Config{}, func(cm CCSMessage) error { return nil }, "empty sender id"),
 			Entry("it should fail on empty api key",
 				&Config{SenderID: "123"}, func(cm CCSMessage) error { return nil }, "empty api key"),
+			Entry("it should fail on wrong credentials",
+				&Config{SenderID: "123", APIKey: "key"}, func(cm CCSMessage) error { return nil },
+				"error connecting gcm xmpp client: auth failure: not-authorized"),
 		)
 
 		Context("good config", func() {
@@ -58,7 +61,6 @@ var _ = Describe("GCM Client", func() {
 			BeforeEach(func() {
 				xm = new(xmppCMock)
 				hm = new(httpCMock)
-				xm.On("ID").Return("id1")
 			})
 
 			AfterEach(func() {
@@ -68,6 +70,7 @@ var _ = Describe("GCM Client", func() {
 			})
 
 			It("should fail on xmpp connection error", func() {
+				xm.On("ID").Return("id")
 				xm.On("Listen", mock.AnythingOfType("gcm.MessageHandler")).
 					Return(errors.New("Connect"))
 				c, err := newGCMClient(xm, hm, &Config{}, nil)
@@ -77,6 +80,7 @@ var _ = Describe("GCM Client", func() {
 			})
 
 			It("should succeed", func() {
+				xm.On("ID").Return("id")
 				xm.On("Listen", mock.AnythingOfType("gcm.MessageHandler")).
 					Return(nil)
 				c, err := newGCMClient(xm, hm, &Config{}, nil)
@@ -86,8 +90,8 @@ var _ = Describe("GCM Client", func() {
 				Expect(c.pingTimeout).To(Equal(DefaultPingTimeout))
 				c.Lock()
 				Expect(c.xmppClient).To(Equal(xm))
-				c.Unlock()
 				Expect(c.cerr).NotTo(BeClosed())
+				c.Unlock()
 			})
 		})
 	})
@@ -113,7 +117,7 @@ var _ = Describe("GCM Client", func() {
 		})
 
 		It("should fail on listen error", func() {
-			xm.On("ID").Return("id1")
+			xm.On("ID").Return("id")
 			xm.On("Listen", mock.AnythingOfType("gcm.MessageHandler")).
 				Return(errors.New("Listen"))
 			cerr := make(chan error)
@@ -191,6 +195,10 @@ var _ = Describe("GCM Client", func() {
 			c = &gcmClient{xmppClient: x}
 		})
 
+		AfterEach(func() {
+			x.AssertExpectations(GinkgoT())
+		})
+
 		It("should close successfully", func() {
 			x.On("Close", true).Return(nil)
 			x.On("IsClosed").Return(true)
@@ -210,35 +218,47 @@ var _ = Describe("GCM Client", func() {
 
 	Describe("periodic ping", func() {
 		var (
-			xm *xmppCMock
-			c  *gcmClient
+			x *xmppCMock
+			c *gcmClient
 		)
 
 		BeforeEach(func() {
-			xm = new(xmppCMock)
-			c = &gcmClient{xmppClient: xm}
+			x = new(xmppCMock)
+			c = &gcmClient{xmppClient: x}
+		})
+
+		AfterEach(func() {
+			x.AssertExpectations(GinkgoT())
 		})
 
 		It("should exit when xmpp client is closed", func() {
-			xm.On("IsClosed").Return(true)
-			err := pingPeriodically(xm, time.Millisecond, time.Millisecond)
+			x.On("IsClosed").Return(true)
+			err := pingPeriodically(x, time.Millisecond, time.Millisecond)
 			Expect(err).NotTo(HaveOccurred())
 		})
 
 		It("should exit when xmpp ping errors", func() {
-			xm.On("IsClosed").Return(false)
-			xm.On("Ping", time.Millisecond).Return(errors.New("Ping"))
-			err := pingPeriodically(xm, time.Millisecond, time.Millisecond)
+			x.On("IsClosed").Return(false)
+			x.On("Ping", time.Millisecond).Return(errors.New("Ping"))
+			err := pingPeriodically(x, time.Millisecond, time.Millisecond)
 			Expect(err).To(HaveOccurred())
 			Expect(err).To(MatchError("Ping"))
 		})
 	})
 
 	Describe("handling upstream messages", func() {
-		var c *gcmClient
+		var (
+			x *xmppCMock
+			c *gcmClient
+		)
 
 		BeforeEach(func() {
-			c = &gcmClient{cerr: make(chan error, 1)}
+			x = new(xmppCMock)
+			c = &gcmClient{xmppClient: x, cerr: make(chan error, 1)}
+		})
+
+		AfterEach(func() {
+			x.AssertExpectations(GinkgoT())
 		})
 
 		It("should handle connection drainging request", func() {
@@ -246,6 +266,7 @@ var _ = Describe("GCM Client", func() {
 				MessageType: CCSControl,
 				ControlType: "CONNECTION_DRAINING",
 			}
+			x.On("ID").Return("id")
 			err := c.onCCSMessage(cm)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(c.cerr).To(HaveLen(1))
@@ -277,9 +298,18 @@ var _ = Describe("GCM Client", func() {
 			c = &gcmClient{xmppClient: x}
 		})
 
+		AfterEach(func() {
+			x.AssertExpectations(GinkgoT())
+		})
+
 		It("should return client id", func() {
 			x.On("ID").Return("id1")
 			Expect(c.ID()).To(Equal("id1"))
+		})
+
+		It("should return client jid", func() {
+			x.On("JID").Return("jid")
+			Expect(c.JID()).To(Equal("jid"))
 		})
 	})
 })

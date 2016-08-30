@@ -38,6 +38,20 @@ func (_m *XMPPClient) IsEncrypted() bool {
 	return r0
 }
 
+// ID provides a mock function with given fields:
+func (_m *XMPPClient) ID() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
 // JID provides a mock function with given fields:
 func (_m *XMPPClient) JID() string {
 	ret := _m.Called()

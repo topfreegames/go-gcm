@@ -44,6 +44,16 @@ var _ = Describe("HTTP Client", func() {
 			}`
 	)
 
+	Context("initializing", func() {
+		It("should init successfully", func() {
+			c := newHTTPClient("key", true)
+			Expect(c).To(BeAssignableToTypeOf(&gcmHTTP{}))
+			gc := c.(*gcmHTTP)
+			Expect(gc.apiKey).To(Equal("key"))
+			Expect(gc.httpClient).NotTo(BeNil())
+		})
+	})
+
 	Context("infrastructure", func() {
 		It("should transform recipient to an array of strings", func() {
 			singleTargetMessage := HTTPMessage{To: "recipient"}

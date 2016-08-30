@@ -129,7 +129,7 @@ func (c *gcmXMPP) IsClosed() bool {
 //
 // Returns error if timeout time passes before pong.
 func (c *gcmXMPP) Ping(timeout time.Duration) error {
-	l := log.WithField("id", c.ID())
+	l := log.WithField("xmpp client id", c.ID())
 	l.Debug("-- ping")
 	c.Lock()
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
@@ -152,10 +152,9 @@ func (c *gcmXMPP) Ping(timeout time.Duration) error {
 // processed or a timeout is reached.
 func (c *gcmXMPP) Close(graceful bool) error {
 	var err error
-	l := log.WithFields(log.Fields{"client id": c.ID(), "graceful": graceful})
+	l := log.WithFields(log.Fields{"gcm xmpp client id": c.ID(), "graceful": graceful})
 	c.destructor.Do(func() {
-		l.Debug("xmppGcmClient close started")
-		defer l.Debug("xmppGcmClient close finished")
+		l.Debug("client close started")
 		c.Lock()
 		c.closed = true
 		c.Unlock()
@@ -169,6 +168,7 @@ func (c *gcmXMPP) Close(graceful bool) error {
 			}
 		}
 		err = c.xmppClient.Close()
+		l.Debug("client closed")
 	})
 
 	return err
@@ -176,6 +176,11 @@ func (c *gcmXMPP) Close(graceful bool) error {
 
 // ID returns the identifier of this XMPP client.
 func (c *gcmXMPP) ID() string {
+	return fmt.Sprintf("%p", c)
+}
+
+// JID returns the JID of this XMPP client.
+func (c *gcmXMPP) JID() string {
 	return c.xmppClient.JID()
 }
 

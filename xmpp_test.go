@@ -21,6 +21,15 @@ func getMsgStr(msg *XMPPMessage) string {
 }
 
 var _ = Describe("GCM XMPP Client", func() {
+	Describe("initializing", func() {
+		It("should fail to initialize due to connect error", func() {
+			c, err := newXMPPClient(false, "sender id", "api key", false)
+			Expect(err).To(HaveOccurred())
+			Expect(c).To(BeNil())
+			Expect(err.Error()).To(HavePrefix("error connecting gcm xmpp client: auth failure"))
+		})
+	})
+
 	Context("initialized", func() {
 		var (
 			xm *mocks.XMPPClient
@@ -29,7 +38,7 @@ var _ = Describe("GCM XMPP Client", func() {
 
 		BeforeEach(func() {
 			xm = new(mocks.XMPPClient)
-			c = &gcmXMPP{xmppClient: xm, pongs: make(chan struct{}, 10)}
+			c = &gcmXMPP{xmppClient: xm, pongs: make(chan struct{}, 100)}
 		})
 
 		AfterEach(func() {
@@ -38,7 +47,7 @@ var _ = Describe("GCM XMPP Client", func() {
 
 		Describe("pinging", func() {
 			BeforeEach(func() {
-				xm.On("JID").Return("jid")
+				//xm.On("ID").Return("id")
 			})
 
 			It("should fail on ping error", func() {
@@ -427,13 +436,13 @@ var _ = Describe("GCM XMPP Client", func() {
 
 		Describe("closing", func() {
 			It("should show if closed", func() {
-				c := &gcmXMPP{closed: true}
-				Expect(c.IsClosed()).To(BeTrue())
+				cc := &gcmXMPP{closed: true}
+				Expect(cc.IsClosed()).To(BeTrue())
 			})
 
 			Context("not graceful close", func() {
 				BeforeEach(func() {
-					xm.On("JID").Return("jid")
+					//xm.On("ID").Return("id")
 				})
 
 				It("should succeed when internal is successful", func() {
@@ -461,7 +470,7 @@ var _ = Describe("GCM XMPP Client", func() {
 					}{
 						m: make(map[string]*messageLogEntry),
 					}
-					xm.On("JID").Return("jid")
+					//xm.On("ID").Return("id")
 				})
 
 				It("should succeed when already closed", func() {
@@ -489,10 +498,15 @@ var _ = Describe("GCM XMPP Client", func() {
 		})
 
 		Describe("misc", func() {
-			It("should return internal client jid", func() {
+			It("should return client id", func() {
+				c := &gcmXMPP{xmppClient: xm}
+				Expect(c.ID()).To(Equal(fmt.Sprintf("%p", c)))
+			})
+
+			It("should return client jid", func() {
 				c := &gcmXMPP{xmppClient: xm}
 				xm.On("JID").Return("jid")
-				Expect(c.ID()).To(Equal("jid"))
+				Expect(c.JID()).To(Equal("jid"))
 			})
 
 			It("should return valid xmpp user", func() {

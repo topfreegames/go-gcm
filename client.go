@@ -21,6 +21,7 @@ type xmppC interface {
 	Close(graceful bool) error
 	IsClosed() bool
 	ID() string
+	JID() string
 }
 
 // gcmClient is a container for http and xmpp GCM clients.
@@ -67,9 +68,14 @@ func NewClient(config *Config, h MessageHandler) (Client, error) {
 	return newGCMClient(xmppc, httpc, config, h)
 }
 
-// ID returns client identification (XMPP JID).
+// ID returns client unique identification.
 func (c *gcmClient) ID() string {
 	return c.xmppClient.ID()
+}
+
+// JID returns client XMPP JID.
+func (c *gcmClient) JID() string {
+	return c.xmppClient.JID()
 }
 
 // SendHTTP sends a message using the HTTP GCM connection server (blocking).
@@ -133,44 +139,50 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 // closes the old client and starts monitoring the new connection.
 func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 	firstRun := true
+	cerr := xcerr
+	xc := c.xmppClient
 	for {
 		// On the first run, send the error upstream.
 		// TODO: channel recreating is ugly.
-		var cerr chan error
-		if firstRun {
-			cerr = xcerr
-		} else {
+		if !firstRun {
+			xc = nil
 			cerr = make(chan error)
 		}
 
 		// Create XMPP client.
-		xmppc, err := connectXMPP(c.xmppClient, c.sandbox, c.senderID, c.apiKey,
+		log.WithField("sender id", c.senderID).Debug("creating gcm xmpp client")
+		xmppc, err := connectXMPP(xc, c.sandbox, c.senderID, c.apiKey,
 			c.onCCSMessage, cerr, c.debug)
 		if err != nil {
 			if firstRun {
+				// On the first run, error exits the monitor.
 				cerr <- err
 				break
 			}
 			log.WithFields(log.Fields{"sender id": c.senderID, "error": err}).
-				Error("connect gcm xmpp")
-			// Wait and try again.
+				Error("connect gcm xmpp client")
+			// Otherwise wait and try again.
 			// TODO: remove infinite loop.
 			time.Sleep(c.pingTimeout)
 			continue
 		}
+		l := log.WithField("xmpp client ref", xmppc.ID())
 
-		// Replace the active client.
+		// Set/replace the active client.
 		c.Lock()
-		oldc := c.xmppClient
+		prevc := c.xmppClient
 		c.xmppClient = xmppc
 		c.cerr = cerr
 		c.Unlock()
 
 		if firstRun {
-			log.WithField("client id", xmppc.ID()).Debug("created gcm xmpp client")
+			l.Info("gcm xmpp client created")
 		} else {
-			log.WithFields(log.Fields{"new client id": xmppc.ID(), "old client id": oldc.ID()}).
-				Debug("replaced gcm xmpp client")
+			l.WithField("previous xmpp client ref", prevc.ID()).
+				Warn("gcm xmpp client replaced")
+
+			// Close the previous client.
+			go prevc.Close(true)
 		}
 
 		// If active monitoring is enabled, start pinging routine.
@@ -180,21 +192,36 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 			}()
 		}
 
+		firstRun = false
+
 		// Wait for an error to occur (from listen or ping).
 		if err = <-cerr; err == nil {
 			// Active close.
 			break
 		}
-		log.WithFields(log.Fields{"client id": xmppc.ID(), "error": err}).
-			Error("gcm xmpp connection")
-
-		// Close the old client.
-		go xmppc.Close(true)
-
-		firstRun = false
+		l.WithField("error", err).Warn("gcm xmpp connection closed")
 	}
 	log.WithField("sender id", c.senderID).
 		Debug("gcm xmpp connection monitor finished")
+}
+
+// CCS upstream message callback.
+// Tries to handle what it can here, before bubbling up.
+func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
+	switch cm.MessageType {
+	case CCSControl:
+		// Handle connection drainging request.
+		if cm.ControlType == CCSDraining {
+			log.WithField("xmpp client ref", c.xmppClient.ID()).
+				Warn("gcm xmpp connection draining requested")
+			// Server should close the current connection.
+			c.cerr <- errors.New("connection draining")
+		}
+		// Don't bubble up control messages.
+		return nil
+	}
+	// Bubble up everything else.
+	return c.mh(cm)
 }
 
 // Creates a new xmpp client (if not provided), connects to the server and starts listening.
@@ -213,10 +240,11 @@ func connectXMPP(c xmppC, isSandbox bool, senderID string, apiKey string,
 		}
 	}
 
-	l := log.WithField("client id", xmppc.ID())
+	l := log.WithField("xmpp client ref", xmppc.ID())
 
 	// Start listening on this connection.
 	go func() {
+		l.Debug("gcm xmpp listen started")
 		if err := xmppc.Listen(h); err != nil {
 			l.WithField("error", err).Error("gcm xmpp listen")
 			cerr <- err
@@ -244,21 +272,4 @@ func pingPeriodically(xm xmppC, timeout, interval time.Duration) error {
 			t.Reset(interval)
 		}
 	}
-}
-
-// CCS upstream message callback.
-// Tries to handle what it can here, before bubbling up.
-func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
-	switch cm.MessageType {
-	case CCSControl:
-		// Handle connection drainging request.
-		if cm.ControlType == CCSDraining {
-			// Server should close the current connection.
-			c.cerr <- errors.New("connection draining")
-		}
-		// Don't bubble up control messages.
-		return nil
-	}
-	// Bubble up everything else.
-	return c.mh(cm)
 }
