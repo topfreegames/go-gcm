@@ -26,7 +26,7 @@ type xmppC interface {
 
 // gcmClient is a container for http and xmpp GCM clients.
 type gcmClient struct {
-	sync.Mutex
+	sync.RWMutex
 	mh      MessageHandler
 	cerr    chan error
 	sandbox bool
@@ -70,11 +70,15 @@ func NewClient(config *Config, h MessageHandler) (Client, error) {
 
 // ID returns client unique identification.
 func (c *gcmClient) ID() string {
+	c.RLock()
+	defer c.RUnlock()
 	return c.xmppClient.ID()
 }
 
 // JID returns client XMPP JID.
 func (c *gcmClient) JID() string {
+	c.RLock()
+	defer c.RUnlock()
 	return c.xmppClient.JID()
 }
 
@@ -85,6 +89,8 @@ func (c *gcmClient) SendHTTP(m HTTPMessage) (*HTTPResponse, error) {
 
 // SendXMPP sends a message using the XMPP GCM connection server (blocking).
 func (c *gcmClient) SendXMPP(m XMPPMessage) (string, int, error) {
+	c.RLock()
+	defer c.RUnlock()
 	return c.xmppClient.Send(m)
 }
 
@@ -103,6 +109,7 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 	c := &gcmClient{
 		httpClient:   httpc,
 		xmppClient:   xmppc,
+		cerr:         make(chan error),
 		senderID:     config.SenderID,
 		apiKey:       config.APIKey,
 		mh:           h,
@@ -119,13 +126,12 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 	}
 
 	// Create and monitor XMPP client.
-	cerr := make(chan error)
-	go c.monitorXMPP(config.MonitorConnection, cerr)
+	go c.monitorXMPP(config.MonitorConnection)
 
 	// Wait a bit to see if the newly created client is ok.
 	// TODO: find a better way (success notification, etc).
 	select {
-	case err := <-cerr:
+	case err := <-c.cerr:
 		return nil, err
 	case <-time.After(time.Second): // TODO: configurable
 		// Looks good.
@@ -137,9 +143,9 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 
 // monitorXMPP creates a new GCM XMPP client (if not provided), replaces the active client,
 // closes the old client and starts monitoring the new connection.
-func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
+func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 	firstRun := true
-	cerr := xcerr
+	cerr := c.cerr
 	xc := c.xmppClient
 	for {
 		// On the first run, send the error upstream.
@@ -156,7 +162,6 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 		if err != nil {
 			if firstRun {
 				// On the first run, error exits the monitor.
-				cerr <- err
 				break
 			}
 			log.WithFields(log.Fields{"sender id": c.senderID, "error": err}).
@@ -168,20 +173,21 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 		}
 		l := log.WithField("xmpp client ref", xmppc.ID())
 
-		// Set/replace the active client.
-		c.Lock()
-		prevc := c.xmppClient
-		c.xmppClient = xmppc
-		c.cerr = cerr
-		c.Unlock()
-
 		if firstRun {
 			l.Info("gcm xmpp client created")
 		} else {
+			// Replace the active client.
+			c.Lock()
+			prevc := c.xmppClient
+			prevcerr := c.cerr
+			c.xmppClient = xmppc
+			c.cerr = cerr
+			c.Unlock()
 			l.WithField("previous xmpp client ref", prevc.ID()).
 				Warn("gcm xmpp client replaced")
 
 			// Close the previous client.
+			close(prevcerr)
 			go prevc.Close(true)
 		}
 
@@ -190,16 +196,17 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool, xcerr chan error) {
 			go func() {
 				cerr <- pingPeriodically(xmppc, c.pingTimeout, c.pingInterval)
 			}()
+			l.Debug("gcm xmpp connection monitoring started")
 		}
 
 		firstRun = false
 
-		// Wait for an error to occur (from listen or ping).
+		// Wait for an error to occur (from listen, ping or upstream control).
 		if err = <-cerr; err == nil {
-			// Active close.
+			// No error, active close.
 			break
 		}
-		l.WithField("error", err).Warn("gcm xmpp connection closed")
+		l.WithField("error", err).Error("gcm xmpp connection")
 	}
 	log.WithField("sender id", c.senderID).
 		Debug("gcm xmpp connection monitor finished")
@@ -215,7 +222,10 @@ func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
 			log.WithField("xmpp client ref", c.xmppClient.ID()).
 				Warn("gcm xmpp connection draining requested")
 			// Server should close the current connection.
-			c.cerr <- errors.New("connection draining")
+			c.Lock()
+			cerr := c.cerr
+			c.Unlock()
+			cerr <- errors.New("connection draining")
 		}
 		// Don't bubble up control messages.
 		return nil
@@ -236,6 +246,7 @@ func connectXMPP(c xmppC, isSandbox bool, senderID string, apiKey string,
 		var err error
 		xmppc, err = newXMPPClient(isSandbox, senderID, apiKey, debug)
 		if err != nil {
+			cerr <- err
 			return nil, err
 		}
 	}

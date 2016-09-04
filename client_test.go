@@ -106,6 +106,7 @@ var _ = Describe("GCM Client", func() {
 			xm = new(xmppCMock)
 			c = &gcmClient{
 				xmppClient: xm,
+				cerr:       make(chan error),
 				senderID:   "sender id",
 				apiKey:     "api key",
 				mh:         nil,
@@ -120,9 +121,8 @@ var _ = Describe("GCM Client", func() {
 			xm.On("ID").Return("id")
 			xm.On("Listen", mock.AnythingOfType("gcm.MessageHandler")).
 				Return(errors.New("Listen"))
-			cerr := make(chan error)
-			go c.monitorXMPP(false, cerr)
-			err := <-cerr
+			go c.monitorXMPP(false)
+			err := <-c.cerr
 			Expect(err).To(MatchError("Listen"))
 		})
 	})

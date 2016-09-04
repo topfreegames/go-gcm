@@ -119,10 +119,7 @@ func newXMPPClient(isSandbox bool, senderID string, apiKey string, debug bool) (
 
 // IsClosed reports if the client is already closed.
 func (c *gcmXMPP) IsClosed() bool {
-	c.RLock()
-	closed := c.closed
-	c.RUnlock()
-	return closed
+	return c.closed
 }
 
 // Ping sends a c2s ping message and blocks until s2c pong is received.
@@ -131,6 +128,7 @@ func (c *gcmXMPP) IsClosed() bool {
 func (c *gcmXMPP) Ping(timeout time.Duration) error {
 	l := log.WithField("xmpp client id", c.ID())
 	l.Debug("-- ping")
+	// Guard wire access for thread safety.
 	c.Lock()
 	if err := c.xmppClient.PingC2S("", c.xmppHost); err != nil {
 		c.Unlock()
@@ -155,10 +153,7 @@ func (c *gcmXMPP) Close(graceful bool) error {
 	l := log.WithFields(log.Fields{"gcm xmpp client id": c.ID(), "graceful": graceful})
 	c.destructor.Do(func() {
 		l.Debug("client close started")
-		c.Lock()
 		c.closed = true
-		c.Unlock()
-
 		if graceful {
 			// Wait until all is done, or timed out.
 			select {
@@ -190,7 +185,7 @@ func (c *gcmXMPP) Listen(h MessageHandler) error {
 	for {
 		stanza, err := c.xmppClient.Recv()
 		if err != nil {
-			if c.IsClosed() {
+			if c.closed {
 				// Client is closed, return without error.
 				break
 			}
@@ -314,7 +309,7 @@ func (c *gcmXMPP) Send(m XMPPMessage) (string, int, error) {
 
 	// For Acks, just send the message.
 	if m.MessageType == CCSAck {
-		// Serialize wire access for thread safety.
+		// Guard wire access for thread safety.
 		c.Lock()
 		bytes, err := c.xmppClient.SendOrg(payload)
 		c.Unlock()
@@ -332,7 +327,7 @@ func (c *gcmXMPP) Send(m XMPPMessage) (string, int, error) {
 	}
 	c.messages.Unlock()
 
-	// Serialize wire access for thread safety.
+	// Guard wire access for thread safety.
 	c.Lock()
 	bytes, err := c.xmppClient.SendOrg(payload)
 	c.Unlock()
@@ -352,7 +347,7 @@ func (c *gcmXMPP) waitAllDone() <-chan struct{} {
 	go func() {
 		for {
 			// Exit if closed.
-			if c.IsClosed() {
+			if c.closed {
 				break
 			}
 			// Exit if done.
