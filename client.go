@@ -197,9 +197,13 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 
 		// If active monitoring is enabled, start pinging routine.
 		if activeMonitor {
-			go func() {
-				cerr <- pingPeriodically(xmppc, c.pingTimeout, c.pingInterval)
-			}()
+			go func(xc xmppC, ce chan<- error) {
+				// pingPeriodically is blocking.
+				perr := pingPeriodically(xc, c.pingTimeout, c.pingInterval)
+				if !xc.IsClosed() {
+					ce <- perr
+				}
+			}(xmppc, cerr)
 			l.Debug("gcm xmpp connection monitoring started")
 		}
 
