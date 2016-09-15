@@ -109,7 +109,7 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 	c := &gcmClient{
 		httpClient:   httpc,
 		xmppClient:   xmppc,
-		cerr:         make(chan error),
+		cerr:         make(chan error, 1),
 		senderID:     config.SenderID,
 		apiKey:       config.APIKey,
 		mh:           h,
@@ -145,12 +145,17 @@ func newGCMClient(xmppc xmppC, httpc httpC, config *Config, h MessageHandler) (*
 // closes the old client and starts monitoring the new connection.
 func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 	firstRun := true
-	cerr := c.cerr
-	xc := c.xmppClient
 	for {
-		// On the first run, send the error upstream.
-		// TODO: channel recreating is ugly.
-		if !firstRun {
+		var (
+			xc   xmppC
+			cerr chan error
+		)
+
+		// On the first run, use the provided client and error channel.
+		if firstRun {
+			cerr = c.cerr
+			xc = c.xmppClient
+		} else {
 			xc = nil
 			cerr = make(chan error)
 		}
@@ -173,13 +178,13 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 		}
 		l := log.WithField("xmpp client ref", xmppc.ID())
 
+		// New GCM XMPP client created and connected.
 		if firstRun {
 			l.Info("gcm xmpp client created")
 		} else {
 			// Replace the active client.
 			c.Lock()
 			prevc := c.xmppClient
-			prevcerr := c.cerr
 			c.xmppClient = xmppc
 			c.cerr = cerr
 			c.Unlock()
@@ -187,7 +192,6 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 				Warn("gcm xmpp client replaced")
 
 			// Close the previous client.
-			close(prevcerr)
 			go prevc.Close(true)
 		}
 
@@ -206,7 +210,9 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 			// No error, active close.
 			break
 		}
+
 		l.WithField("error", err).Error("gcm xmpp connection")
+		close(cerr)
 	}
 	log.WithField("sender id", c.senderID).
 		Debug("gcm xmpp connection monitor finished")
@@ -236,7 +242,7 @@ func (c *gcmClient) onCCSMessage(cm CCSMessage) error {
 
 // Creates a new xmpp client (if not provided), connects to the server and starts listening.
 func connectXMPP(c xmppC, isSandbox bool, senderID string, apiKey string,
-	h MessageHandler, cerr chan error, debug bool) (xmppC, error) {
+	h MessageHandler, cerr chan<- error, debug bool) (xmppC, error) {
 	var xmppc xmppC
 	if c != nil {
 		// Use the provided client.
