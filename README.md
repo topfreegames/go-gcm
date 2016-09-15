@@ -1,4 +1,4 @@
-GCM Library for Go [![GoDoc][godoc image]][godoc] [![Build Status][travis image]][travis] [![Coverage Status][codecov image]][codecov]
+GCM Library for Go [![GoDoc][godoc image]][godoc] [![Build Status][travis image]][travis] [![Coverage Status][codecov image]][codecov] [![GitHub tag][tag shield image]](https://github.com/rounds/go-gcm/tags) [![Go Report Card][getreport image]](https://goreportcard.com/report/rounds/go-gcm)
 --
 
 Provides the following functionality for Google Cloud Messaging:
@@ -39,3 +39,6 @@ Please read CONTRIBUTING and raise issues here in Github.
 
 [codecov image]: https://codecov.io/gh/rounds/go-gcm/branch/master/graph/badge.svg
 [codecov]: https://codecov.io/gh/rounds/go-gcm
+
+[tag shield image]: https://img.shields.io/github/tag/rounds/go-gcm.svg?maxAge=2592000
+[getreport image]: https://goreportcard.com/badge/rounds/go-gcm

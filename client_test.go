@@ -219,12 +219,10 @@ var _ = Describe("GCM Client", func() {
 	Describe("periodic ping", func() {
 		var (
 			x *xmppCMock
-			c *gcmClient
 		)
 
 		BeforeEach(func() {
 			x = new(xmppCMock)
-			c = &gcmClient{xmppClient: x}
 		})
 
 		AfterEach(func() {

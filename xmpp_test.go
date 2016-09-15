@@ -149,7 +149,7 @@ var _ = Describe("GCM XMPP Client", func() {
 				})
 			})
 
-			Context("recv sucessful", func() {
+			Context("recv successful", func() {
 				var (
 					c1, c2 int
 					ret    interface{}

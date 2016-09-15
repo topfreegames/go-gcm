@@ -20,21 +20,35 @@ const (
 	DefaultPingTimeout = 30 * time.Second
 
 	// CCS XMPP message types.
-	CCSAck     = "ack"
-	CCSNack    = "nack"
+
+	// CCSAck is a positive acknowledge.
+	CCSAck = "ack"
+	// CCSNack is a negative acknowledge.
+	CCSNack = "nack"
+	// CCSControl is a CCS upstream control message.
 	CCSControl = "control"
+	// CCSReceipt is an upstream receipt message.
 	CCSReceipt = "receipt"
+
 	// CCS XMPP control message types.
+
+	// CCSDraining is an upstream CSS message it wants to drain the current connection.
 	CCSDraining = "CONNECTION_DRAINING"
+
 	// XMPP message types.
+
+	// XMPPIQResult is a result for IQ query.
 	XMPPIQResult = "result"
+
 	// GCM service constants.
 	ccsHostProd = "gcm.googleapis.com"
 	ccsPortProd = "5235"
 	ccsHostDev  = "gcm-preprod.googleapis.com"
 	ccsPortDev  = "5236"
+
 	// For CCS the min for exponential backoff has to be 1 sec
 	ccsMinBackoff = 1 * time.Second
+
 	// Formatter for outgoing stanzas.
 	stanzaFmtStr = `<message id="%s"><gcm xmlns="google:mobile:data">%v</gcm></message>`
 )
