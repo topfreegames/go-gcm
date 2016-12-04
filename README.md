@@ -1,4 +1,4 @@
-GCM Library for Go [![GoDoc][godoc image]][godoc] [![Build Status][travis image]][travis] [![Coverage Status][codecov image]][codecov] [![GitHub tag][tag shield image]](https://github.com/rounds/go-gcm/tags) [![Go Report Card][getreport image]](https://goreportcard.com/report/rounds/go-gcm)
+GCM Library for Go [![GoDoc][godoc image]][godoc] [![Build Status][travis image]][travis] [![Coverage Status][codecov image]][codecov] [![Go Report Card][getreport image]](https://goreportcard.com/report/rounds/go-gcm)
 --
 
 Provides the following functionality for Google Cloud Messaging:
