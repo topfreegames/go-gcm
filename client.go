@@ -181,6 +181,7 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 		// New GCM XMPP client created and connected.
 		if firstRun {
 			l.Info("gcm xmpp client created")
+			firstRun = false
 		} else {
 			// Replace the active client.
 			c.Lock()
@@ -206,8 +207,6 @@ func (c *gcmClient) monitorXMPP(activeMonitor bool) {
 			}(xmppc, cerr)
 			l.Debug("gcm xmpp connection monitoring started")
 		}
-
-		firstRun = false
 
 		// Wait for an error to occur (from listen, ping or upstream control).
 		if err = <-cerr; err == nil {
