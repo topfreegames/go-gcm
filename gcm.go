@@ -15,14 +15,47 @@
 // Package gcm provides send and receive GCM functionality.
 package gcm
 
-// HTTPMessage defines a downstream GCM HTTP message.
+// Client defines an interface for the GCM client.
+type Client interface {
+	ID() string
+	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
+	SendXMPP(m XMPPMessage) (string, int, error)
+	Close() error
+}
+
+// Data defines the custom payload of a GCM message.
+type Data map[string]interface{}
+
+// Notification defines the notification payload of a FCM message.
+// NOTE: contains keys for both Android and iOS notifications.
+type Notification struct {
+	// Common fields.
+	Title        string `json:"title,omitempty"`
+	Body         string `json:"body,omitempty"`
+	Sound        string `json:"sound,omitempty"`
+	ClickAction  string `json:"click_action,omitempty"`
+	BodyLocKey   string `json:"body_loc_key,omitempty"`
+	BodyLocArgs  string `json:"body_loc_args,omitempty"`
+	TitleLocKey  string `json:"title_loc_key,omitempty"`
+	TitleLocArgs string `json:"title_loc_args,omitempty"`
+
+	// Android-only fields.
+	Icon  string `json:"icon,omitempty"`
+	Tag   string `json:"tag,omitempty"`
+	Color string `json:"color,omitempty"`
+
+	// iOS-only fields
+	Badge string `json:"badge,omitempty"`
+}
+
+// HTTPMessage defines a downstream FCM HTTP message.
 type HTTPMessage struct {
 	To                    string        `json:"to,omitempty"`
 	RegistrationIDs       []string      `json:"registration_ids,omitempty"`
+	Condition             string        `json:"condition,omitempty"`
 	CollapseKey           string        `json:"collapse_key,omitempty"`
 	Priority              string        `json:"priority,omitempty"`
 	ContentAvailable      bool          `json:"content_available,omitempty"`
-	DelayWhileIdle        bool          `json:"delay_while_idle,omitempty"`
 	TimeToLive            *uint         `json:"time_to_live,omitempty"`
 	RestrictedPackageName string        `json:"restricted_package_name,omitempty"`
 	DryRun                bool          `json:"dry_run,omitempty"`
@@ -30,16 +63,18 @@ type HTTPMessage struct {
 	Notification          *Notification `json:"notification,omitempty"`
 }
 
-// HTTPResponse is the GCM connection server response to an HTTP downstream message.
+// HTTPResponse is the FCM connection server response to an HTTP downstream message.
 type HTTPResponse struct {
 	StatusCode   int          `json:"-"`
-	MulticastID  int64        `json:"multicast_id,omitempty"`
-	Success      uint         `json:"success,omitempty"`
-	Failure      uint         `json:"failure,omitempty"`
-	CanonicalIds uint         `json:"canonical_ids,omitempty"`
+	MulticastID  int64        `json:"multicast_id"`
+	Success      uint         `json:"success"`
+	Failure      uint         `json:"failure"`
+	CanonicalIds uint         `json:"canonical_ids"`
 	Results      []HTTPResult `json:"results,omitempty"`
-	MessageID    uint         `json:"message_id,omitempty"`
-	Error        string       `json:"error,omitempty"`
+
+	// Topic message HTTP response only.
+	MessageID uint   `json:"message_id,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // HTTPResult represents the result of a single processed HTTP request.
@@ -49,39 +84,20 @@ type HTTPResult struct {
 	Error          string `json:"error,omitempty"`
 }
 
-// XMPPMessage defines a downstream GCM XMPP message.
+// XMPPMessage defines a downstream FCM XMPP message (server to device).
 type XMPPMessage struct {
 	To                       string        `json:"to,omitempty"`
+	Condition                string        `json:"condition,omitempty"`
 	MessageID                string        `json:"message_id"`
-	MessageType              string        `json:"message_type,omitempty"`
+	MessageType 		 string        `json:"message_type"`
 	CollapseKey              string        `json:"collapse_key,omitempty"`
 	Priority                 string        `json:"priority,omitempty"`
 	ContentAvailable         bool          `json:"content_available,omitempty"`
-	DelayWhileIdle           bool          `json:"delay_while_idle,omitempty"`
 	TimeToLive               *uint         `json:"time_to_live,omitempty"`
 	DeliveryReceiptRequested bool          `json:"delivery_receipt_requested,omitempty"`
 	DryRun                   bool          `json:"dry_run,omitempty"`
 	Data                     Data          `json:"data,omitempty"`
 	Notification             *Notification `json:"notification,omitempty"`
-}
-
-// Data defines the custom payload of a GCM message.
-type Data map[string]interface{}
-
-// Notification defines the notification payload of a GCM message.
-type Notification struct {
-	Title        string `json:"title,omitempty"`
-	Body         string `json:"body,omitempty"`
-	Icon         string `json:"icon,omitempty"`
-	Sound        string `json:"sound,omitempty"`
-	Badge        string `json:"badge,omitempty"`
-	Tag          string `json:"tag,omitempty"`
-	Color        string `json:"color,omitempty"`
-	ClickAction  string `json:"click_action,omitempty"`
-	BodyLocKey   string `json:"body_loc_key,omitempty"`
-	BodyLocArgs  string `json:"body_loc_args,omitempty"`
-	TitleLocArgs string `json:"title_loc_args,omitempty"`
-	TitleLocKey  string `json:"title_loc_key,omitempty"`
 }
 
 // Config is a container for GCM client configuration data.
@@ -110,13 +126,5 @@ type CCSMessage struct {
 	ControlType      string `json:"control_type,omitempty"`
 }
 
-// MessageHandler is the type for a function that handles a CCS message.
+// MessageHandler is a type for a callback function that handles a CCS message.
 type MessageHandler func(cm CCSMessage) error
-
-// Client defines an interface for the GCM client.
-type Client interface {
-	ID() string
-	SendHTTP(m HTTPMessage) (*HTTPResponse, error)
-	SendXMPP(m XMPPMessage) (string, int, error)
-	Close() error
-}

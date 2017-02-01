@@ -40,10 +40,10 @@ const (
 	// XMPPIQResult is a result for IQ query.
 	XMPPIQResult = "result"
 
-	// GCM service constants.
-	ccsHostProd = "gcm.googleapis.com"
+	// FCM service constants.
+	ccsHostProd = "fcm-xmpp.googleapis.com"
 	ccsPortProd = "5235"
-	ccsHostDev  = "gcm-preprod.googleapis.com"
+	ccsHostDev  = "fcm-xmpp.googleapis.com"
 	ccsPortDev  = "5236"
 
 	// For CCS the min for exponential backoff has to be 1 sec
@@ -98,7 +98,7 @@ type messageLogEntry struct {
 	backoff backoffProvider
 }
 
-// newXMPPClient creates a new client for GCM XMPP Server (CCS).
+// newXMPPClient creates a new client for FCM XMPP Server (CCS).
 func newXMPPClient(isSandbox bool, senderID string, apiKey string, debug bool) (xmppC, error) {
 	var xmppHost, xmppAddress string
 	if isSandbox {
