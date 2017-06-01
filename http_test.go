@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"time"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
@@ -99,6 +100,12 @@ var _ = Describe("HTTP Client", func() {
 			}
 			resp := buildRespForMulticast(ids, resultsState, 216)
 			Expect(resp).To(Equal(response))
+		})
+
+		It("should parse retryAfter correctly", func() {
+			Expect(parseRetryAfter("10")).To(Equal(time.Second * 10))
+			Expect(parseRetryAfter("Fri, 31 Dec 2030 23:59:59 GMT")).NotTo(BeZero())
+			Expect(parseRetryAfter("Fri, 31 Dec 2000 23:59:59 GMT")).To(BeZero())
 		})
 	})
 

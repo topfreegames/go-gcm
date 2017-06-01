@@ -107,18 +107,22 @@ func parseRetryAfter(retryAfter string) (time.Duration, error) {
 	// W3 spec, section 14.37:
 	// Retry-After  = "Retry-After" ":" ( HTTP-date | delta-seconds )
 	// Examples:
-        // Retry-After: Fri, 31 Dec 1999 23:59:59 GMT
-        // Retry-After: 120
+	// Retry-After: Fri, 31 Dec 1999 23:59:59 GMT
+	// Retry-After: 120
 	// Assuming that the header contains seconds instead of a date
 
 	// Try parsing seconds first:
-	if d, err := time.ParseDuration(retryAfter); err == nil {
+	if d, err := time.ParseDuration(fmt.Sprintf("%vs", retryAfter)); err == nil {
 		return d, nil
 	}
 
 	// Try parsing http date
 	if t, err := http.ParseTime(retryAfter); err == nil {
-		return t.Sub(time.Now().UTC()), nil
+		d := t.Sub(time.Now().UTC())
+		if d < 0 {
+			d = 0
+		}
+		return d, nil
 	}
 
 	return 0, fmt.Errorf("cannot parse Retry-After header %s", retryAfter)
@@ -166,7 +170,7 @@ func sendHTTP(httpClient httpClient, URL string, apiKey string, m HTTPMessage,
 		if debug {
 			log.WithFields(log.Fields{
 				"status": httpResp.StatusCode,
-				"body": string(body),
+				"body":   string(body),
 			}).Debug("gcm http reply")
 		}
 		err = json.Unmarshal(body, gcmResp)
