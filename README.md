@@ -10,7 +10,7 @@ Documentation: [see godoc][godoc]
 
 ## Installation
 
-    $ go get github.com/kikinteractive/go-gcm
+    $ go get github.com/topfreegames/go-gcm
 
 ## Status
 
@@ -36,18 +36,18 @@ Please read CONTRIBUTING and raise issues here in Github.
 
 Note that [GCM limitations][gcm limitations] are not enforced by the library. Instead, all valid requests are sent to the server and a corresponding error is returned (Message Too Big, Device Message Rate Exceeded, etc).
 
-[godoc]: https://godoc.org/github.com/kikinteractive/go-gcm
-[godoc image]: https://godoc.org/github.com/kikinteractive/go-gcm?status.svg
+[godoc]: https://godoc.org/github.com/topfreegames/go-gcm
+[godoc image]: https://godoc.org/github.com/topfreegames/go-gcm?status.svg
 
-[travis image]: https://travis-ci.org/kikinteractive/go-gcm.svg
-[travis]: https://travis-ci.org/kikinteractive/go-gcm
+[travis image]: https://travis-ci.org/topfreegames/go-gcm.svg
+[travis]: https://travis-ci.org/topfreegames/go-gcm
 
-[codecov image]: https://codecov.io/gh/kikinteractive/go-gcm/branch/master/graph/badge.svg
-[codecov]: https://codecov.io/gh/kikinteractive/go-gcm
+[codecov image]: https://codecov.io/gh/topfreegames/go-gcm/branch/master/graph/badge.svg
+[codecov]: https://codecov.io/gh/topfreegames/go-gcm
 
-[tag shield image]: https://img.shields.io/github/tag/kikinteractive/go-gcm.svg?maxAge=2592000
+[tag shield image]: https://img.shields.io/github/tag/topfreegames/go-gcm.svg?maxAge=2592000
 
-[goreportcard]: https://goreportcard.com/report/kikinteractive/go-gcm
-[goreportcard image]: https://goreportcard.com/badge/kikinteractive/go-gcm
+[goreportcard]: https://goreportcard.com/report/topfreegames/go-gcm
+[goreportcard image]: https://goreportcard.com/badge/topfreegames/go-gcm
 
 [gcm limitations]: https://gist.github.com/mnemonicflow/d08af1c1ea2f54f8667f

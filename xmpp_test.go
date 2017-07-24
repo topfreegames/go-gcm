@@ -9,7 +9,7 @@ import (
 
 	"github.com/mattn/go-xmpp"
 
-	"github.com/kikinteractive/go-gcm/mocks"
+	"github.com/topfreegames/go-gcm/mocks"
 
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
