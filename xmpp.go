@@ -43,7 +43,7 @@ const (
 	// GCM service constants.
 	ccsHostProd = "fcm-xmpp.googleapis.com"
 	ccsPortProd = "5235"
-	ccsHostDev  = "cm-xmpp.googleapis.com"
+	ccsHostDev  = "fcm-xmpp.googleapis.com"
 	ccsPortDev  = "5236"
 
 	// For CCS the min for exponential backoff has to be 1 sec
