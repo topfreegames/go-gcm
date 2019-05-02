@@ -510,7 +510,7 @@ var _ = Describe("GCM XMPP Client", func() {
 			})
 
 			It("should return valid xmpp user", func() {
-				Expect(xmppUser("host", "sender")).To(Equal("sender@host"))
+				Expect(xmppUser("host", "sender")).To(Equal("sender@gcm.googleapis.com"))
 			})
 		})
 	})
