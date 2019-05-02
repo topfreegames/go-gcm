@@ -396,7 +396,6 @@ func (c *gcmXMPP) retryMessage(cm CCSMessage, h MessageHandler) {
 	}
 }
 
-// xmppUser generates an xmpp username from a sender ID.
 func xmppUser(xmppHost, senderID string) string {
-	return senderID + "@" + xmppHost
+	return senderID + "@gcm.googleapis.com"
 }
